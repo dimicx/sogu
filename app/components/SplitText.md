@@ -36,11 +36,12 @@ function Example() {
 
 ## Props
 
-| Prop | Type | Required | Description |
-|------|------|----------|-------------|
-| `children` | `ReactElement` | Yes | A single React element containing text (e.g., `<h1>`, `<p>`, `<span>`) |
-| `onSplit` | `(result: SplitResult) => void` | Yes | Callback invoked after text is split, receives arrays of DOM elements |
-| `options` | `SplitTextOptions` | No | Configuration options passed to `splitText` |
+| Prop        | Type                            | Required | Description                                                                 |
+| ----------- | ------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `children`  | `ReactElement`                  | Yes      | A single React element containing text (e.g., `<h1>`, `<p>`, `<span>`)      |
+| `onSplit`   | `(result: SplitResult) => void` | Yes      | Callback invoked after text is split, receives arrays of DOM elements       |
+| `options`   | `SplitTextOptions`              | No       | Configuration options passed to `splitText`                                 |
+| `autoSplit` | `boolean`                       | No       | Re-split text on resize without re-triggering animations (default: `false`) |
 
 ### SplitResult
 
@@ -48,9 +49,9 @@ The `onSplit` callback receives an object with three arrays:
 
 ```ts
 interface SplitResult {
-  chars: Element[];  // Individual character <span> elements
-  words: Element[];  // Individual word <span> elements
-  lines: Element[];  // Individual line <span> elements
+  chars: Element[]; // Individual character <span> elements
+  words: Element[]; // Individual word <span> elements
+  lines: Element[]; // Individual line <span> elements
 }
 ```
 
@@ -60,10 +61,10 @@ Optional configuration for the underlying `splitText` function:
 
 ```ts
 interface SplitTextOptions {
-  charClass?: string;   // CSS class for character spans (default: "split-char")
-  wordClass?: string;   // CSS class for word spans (default: "split-word")
-  lineClass?: string;   // CSS class for line spans (default: "split-line")
-  splitBy?: string;     // Custom delimiter (default: " " space)
+  charClass?: string; // CSS class for character spans (default: "split-char")
+  wordClass?: string; // CSS class for word spans (default: "split-word")
+  lineClass?: string; // CSS class for line spans (default: "split-line")
+  splitBy?: string; // Custom delimiter (default: " " space)
 }
 ```
 
@@ -114,8 +115,8 @@ interface SplitTextOptions {
   }}
 >
   <p>
-    Create beautiful animations with just a few lines of code.
-    Motion handles the complexity for you.
+    Create beautiful animations with just a few lines of code. Motion handles
+    the complexity for you.
   </p>
 </SplitText>
 ```
@@ -147,14 +148,13 @@ import { animate, scroll } from "motion";
 
 <SplitText
   onSplit={({ words }) => {
-    scroll(
-      animate(words, { opacity: [0, 1], y: [20, 0] }),
-      { target: containerRef.current }
-    );
+    scroll(animate(words, { opacity: [0, 1], y: [20, 0] }), {
+      target: containerRef.current,
+    });
   }}
 >
   <p>This text animates as you scroll</p>
-</SplitText>
+</SplitText>;
 ```
 
 ### Hover Effects on Characters
@@ -175,7 +175,7 @@ import { animate, hover } from "motion";
   }}
 >
   <span>Hover over me</span>
-</SplitText>
+</SplitText>;
 ```
 
 ### Custom CSS Classes
@@ -202,6 +202,41 @@ import { animate, hover } from "motion";
 }
 ```
 
+### Auto Re-split on Resize
+
+When using line-based animations, text reflow on window resize can break the layout. The `autoSplit` prop automatically re-splits text when the element resizes, without re-triggering animations:
+
+```tsx
+<SplitText
+  autoSplit
+  onSplit={({ lines }) => {
+    animate(
+      lines,
+      { opacity: [0, 1], x: [-30, 0] },
+      { type: "spring", duration: 1.2, delay: stagger(0.15) }
+    );
+  }}
+>
+  <p>
+    This paragraph will re-split correctly when the window resizes, keeping
+    proper line breaks without replaying the animation.
+  </p>
+</SplitText>
+```
+
+**How it works:**
+
+- Stores the original HTML before the first split
+- Attaches a `ResizeObserver` to the child element
+- On resize, restores original HTML and re-runs `splitText`
+- Does NOT call `onSplit` again, so animations don't replay
+
+**When to use:**
+
+- Line-based animations (`lines` array)
+- Responsive layouts where text reflows
+- NOT needed for word/character animations (they reflow naturally)
+
 ## How It Works
 
 ### Component Architecture
@@ -227,16 +262,19 @@ import { animate, hover } from "motion";
 ### Execution Flow
 
 1. **Render Phase**
+
    - Validate that `children` is a valid React element
    - Clone the child element using `cloneElement`, injecting a callback ref
    - Render the cloned child inside a hidden container
 
 2. **Mount Phase**
+
    - React calls `childRefCallback` with the DOM node
    - `setChildElement(node)` stores the reference in state
    - This triggers the `useEffect`
 
 3. **Effect Phase**
+
    - Wait for `document.fonts.ready` to ensure accurate text measurements
    - Call `splitText(childElement, options)` which:
      - Replaces text content with nested `<span>` elements
@@ -268,6 +306,7 @@ cloneElement(children, { ref: childRefCallback });
 ### Why Wait for Fonts?
 
 `splitText` measures text dimensions to determine line breaks. If custom fonts haven't loaded yet:
+
 - Text may be rendered with fallback fonts
 - Measurements will be incorrect
 - Lines may wrap differently after fonts load
@@ -307,6 +346,39 @@ If words appear squished together, ensure whitespace is preserved:
 }
 ```
 
+## Performance
+
+The component is optimized for performance and follows React best practices:
+
+### Stable Callback References
+
+You don't need to memoize `onSplit` or `options` with `useCallback`/`useMemo`. The component internally stores these in refs and only runs effects when the DOM element changes:
+
+```tsx
+// ✅ This is fine - no unnecessary re-renders or re-animations
+<SplitText
+  onSplit={({ words }) => animate(words, { opacity: 1 })}
+  options={{ wordClass: "my-word" }}
+>
+  <h1>Hello</h1>
+</SplitText>
+```
+
+### React Strict Mode
+
+The component handles React 19's Strict Mode correctly. Effects are guarded against double-execution, so animations only run once even in development mode.
+
+### Async Cleanup
+
+Font loading is async (`document.fonts.ready`). If the component unmounts before fonts load, callbacks are safely cancelled to prevent memory leaks or errors.
+
+### Browser Support
+
+- **ResizeObserver**: Chrome 64+, Firefox 69+, Safari 13.1+, Edge 79+
+- **document.fonts**: Chrome 35+, Firefox 41+, Safari 10+, Edge 79+
+
+Both APIs are well-supported in all modern browsers (2020+).
+
 ## Caveats
 
 1. **Single Child Only**: The component expects exactly one React element as children. Fragments or multiple children are not supported.
@@ -315,7 +387,7 @@ If words appear squished together, ensure whitespace is preserved:
 
 3. **No SSR**: The component requires DOM access and should only run on the client (hence `"use client"`).
 
-4. **One-Time Split**: Text is split once on mount. If the text content changes, you'll need to remount the component.
+4. **One-Time Split**: Text is split once on mount. If the text content changes, you'll need to remount the component. Use `autoSplit` for responsive resize handling.
 
 5. **Font Loading**: Ensure custom fonts are properly loaded. The component waits for `document.fonts.ready`, but fonts must be declared in CSS.
 
@@ -335,5 +407,5 @@ import { SplitText } from "./components/SplitText";
   }}
 >
   <h1>Hello</h1>
-</SplitText>
+</SplitText>;
 ```

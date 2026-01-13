@@ -7,6 +7,7 @@ import {
   ReactElement,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -28,31 +29,127 @@ interface SplitTextProps {
   children: ReactElement;
   onSplit: (result: SplitResult) => void;
   options?: SplitTextOptions;
+  autoSplit?: boolean;
 }
 
-export function SplitText({ children, onSplit, options }: SplitTextProps) {
+export function SplitText({
+  children,
+  onSplit,
+  options,
+  autoSplit = false,
+}: SplitTextProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [childElement, setChildElement] = useState<HTMLElement | null>(null);
+
+  // Stable refs for callbacks and options (prevents unnecessary effect re-runs)
+  const onSplitRef = useRef(onSplit);
+  const optionsRef = useRef(options);
+
+  // Keep refs in sync with latest props (useLayoutEffect to update before other effects)
+  useLayoutEffect(() => {
+    onSplitRef.current = onSplit;
+    optionsRef.current = options;
+  });
+
+  // Refs for autoSplit (no re-renders needed)
+  const originalHtmlRef = useRef<string | null>(null);
+  const hasMultipleLinesRef = useRef(false);
+  const lastWidthRef = useRef<number | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasSplitRef = useRef(false);
 
   const childRefCallback = useCallback((node: HTMLElement | null) => {
     setChildElement(node);
   }, []);
 
+  // Initial split and animation
   useEffect(() => {
     if (!childElement) return;
 
-    document.fonts.ready.then(() => {
-      if (!childElement || !containerRef.current) return;
+    // Guard against double-execution in Strict Mode
+    if (hasSplitRef.current) return;
 
-      const result = splitText(childElement, options);
+    // Track mounted state for async cleanup
+    let isMounted = true;
+
+    document.fonts.ready.then(() => {
+      // Bail out if unmounted or already split
+      if (!isMounted || hasSplitRef.current) return;
+      if (!containerRef.current) return;
+
+      // Store original HTML before first split
+      if (originalHtmlRef.current === null) {
+        originalHtmlRef.current = childElement.innerHTML;
+      }
+
+      const result = splitText(childElement, optionsRef.current);
+
+      // Mark as split to prevent re-runs
+      hasSplitRef.current = true;
+
+      // Track line count and initial width (for autoSplit)
+      hasMultipleLinesRef.current = result.lines.length > 1;
+      lastWidthRef.current = childElement.offsetWidth;
 
       // Reveal the container after splitting
       containerRef.current.style.visibility = "visible";
 
       // Invoke the callback with split elements
-      onSplit(result);
+      onSplitRef.current(result);
     });
-  }, [childElement, onSplit, options]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [childElement]);
+
+  // ResizeObserver for autoSplit
+  useEffect(() => {
+    if (!autoSplit || !childElement) return;
+
+    const handleResize = () => {
+      // Only re-split if we have multiple lines
+      if (!hasMultipleLinesRef.current) return;
+      if (originalHtmlRef.current === null) return;
+
+      // Skip if width hasn't changed
+      const currentWidth = childElement.offsetWidth;
+      if (currentWidth === lastWidthRef.current) return;
+      lastWidthRef.current = currentWidth;
+
+      // Restore original HTML and re-split
+      childElement.innerHTML = originalHtmlRef.current;
+      const result = splitText(childElement, optionsRef.current);
+
+      // Update line count (might become single line at wide widths)
+      hasMultipleLinesRef.current = result.lines.length > 1;
+    };
+
+    let skipFirst = true;
+
+    const resizeObserver = new ResizeObserver(() => {
+      // Skip the initial callback that fires immediately on observe
+      if (skipFirst) {
+        skipFirst = false;
+        return;
+      }
+
+      // Debounce: clear pending timer and set new one
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(handleResize, 100);
+    });
+
+    resizeObserver.observe(childElement);
+
+    return () => {
+      resizeObserver.disconnect();
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [autoSplit, childElement]);
 
   if (!isValidElement(children)) {
     console.error("SplitText: children must be a single valid React element");
