@@ -2,17 +2,12 @@
 
 import { animate, stagger } from "motion";
 import { SplitText } from "./components/SplitText";
-import { useState } from "react";
 
 export default function Home() {
-  const [count, setCount] = useState(0);
-
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-24 bg-zinc-950 px-8 py-24 font-sans">
       {/* Example 1: Staggered words with spring */}
       <section className="flex w-full max-w-2xl flex-col gap-4">
-        <button onClick={() => setCount(count + 1)}>Click me</button>
-        <p>Count: {count}</p>
         <span className="text-xs font-medium uppercase tracking-widest text-zinc-500">
           Staggered Words
         </span>
