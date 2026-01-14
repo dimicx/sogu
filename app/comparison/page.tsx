@@ -40,7 +40,7 @@ export default function ComparisonPage() {
     if (!customRef.current) return;
 
     if (customSplit) {
-      const result = customSplitText(customRef.current);
+      const result = customSplitText(customRef.current, { autoSplit: true });
       customRevertRef.current = result.revert;
     } else {
       // Revert using the stored revert function

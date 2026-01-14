@@ -9,6 +9,12 @@ export interface SplitTextOptions {
   charClass?: string;
   wordClass?: string;
   lineClass?: string;
+  /** Auto-split on resize (observes parent element) */
+  autoSplit?: boolean;
+  /** Callback when resize triggers re-split (does not re-trigger initial animations) */
+  onResize?: (result: Omit<SplitResult, "revert" | "dispose">) => void;
+  /** Auto-revert when promise resolves (e.g., animation.finished) */
+  revertOnComplete?: Promise<unknown>;
 }
 
 export interface SplitResult {
@@ -17,6 +23,8 @@ export interface SplitResult {
   lines: HTMLSpanElement[];
   /** Revert the element to its original state */
   revert: () => void;
+  /** Cleanup observers and timers (must be called when using autoSplit) */
+  dispose: () => void;
 }
 
 interface MeasuredChar {
@@ -123,30 +131,20 @@ function createSpan(
 }
 
 /**
- * Split text into characters, words, and lines with kerning compensation.
+ * Internal function that performs the actual splitting logic.
+ * Can be called both initially and on resize.
  */
-export function splitText(
+function performSplit(
   element: HTMLElement,
-  {
-    charClass = "split-char",
-    wordClass = "split-word",
-    lineClass = "split-line",
-  }: SplitTextOptions = {}
-): SplitResult {
-  // Store original HTML for revert
-  const originalHTML = element.innerHTML;
-  const text = element.textContent || "";
-
-  // Set aria-label for accessibility
-  element.setAttribute("aria-label", text);
-
-  // Disable ligatures permanently - this ensures consistent appearance
-  // before split, during split, and after revert (ligatures can't span multiple elements)
-  element.style.fontVariantLigatures = "none";
-
-  // STEP 1: Measure original character positions BEFORE modifying DOM
-  const measuredWords = measureOriginalText(element);
-
+  measuredWords: MeasuredWord[],
+  charClass: string,
+  wordClass: string,
+  lineClass: string
+): {
+  chars: HTMLSpanElement[];
+  words: HTMLSpanElement[];
+  lines: HTMLSpanElement[];
+} {
   // Clear element
   element.textContent = "";
 
@@ -276,11 +274,187 @@ export function splitText(
     chars: allChars,
     words: allWords,
     lines: allLines,
-    revert: () => {
-      element.innerHTML = originalHTML;
-      element.removeAttribute("aria-label");
-      // Keep ligatures disabled for consistent appearance
-      element.style.fontVariantLigatures = "none";
-    },
+  };
+}
+
+/**
+ * Split text into characters, words, and lines with kerning compensation.
+ */
+export function splitText(
+  element: HTMLElement,
+  {
+    charClass = "split-char",
+    wordClass = "split-word",
+    lineClass = "split-line",
+    autoSplit = false,
+    onResize,
+    revertOnComplete,
+  }: SplitTextOptions = {}
+): SplitResult {
+  // Store original HTML for revert
+  const originalHTML = element.innerHTML;
+  const text = element.textContent || "";
+
+  // State management (closure-based)
+  let isActive = true;
+  let resizeObserver: ResizeObserver | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastWidth: number | null = null;
+
+  // Store current split result (needed for autoSplit)
+  let currentChars: HTMLSpanElement[] = [];
+  let currentWords: HTMLSpanElement[] = [];
+  let currentLines: HTMLSpanElement[] = [];
+
+  // Set aria-label for accessibility
+  element.setAttribute("aria-label", text);
+
+  // Disable ligatures permanently - this ensures consistent appearance
+  // before split, during split, and after revert (ligatures can't span multiple elements)
+  element.style.fontVariantLigatures = "none";
+
+  // STEP 1: Measure original character positions BEFORE modifying DOM
+  const measuredWords = measureOriginalText(element);
+
+  // Perform the split
+  const { chars, words, lines } = performSplit(
+    element,
+    measuredWords,
+    charClass,
+    wordClass,
+    lineClass
+  );
+
+  // Store initial result
+  currentChars = chars;
+  currentWords = words;
+  currentLines = lines;
+
+  // Cleanup function to disconnect observers and timers
+  const dispose = () => {
+    if (!isActive) return;
+
+    // Disconnect observer
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+
+    // Clear debounce timer
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+
+    isActive = false;
+  };
+
+  // Revert function with automatic disposal
+  const revert = () => {
+    if (!isActive) return;
+
+    element.innerHTML = originalHTML;
+    element.removeAttribute("aria-label");
+    // Keep ligatures disabled for consistent appearance
+    element.style.fontVariantLigatures = "none";
+
+    // Auto-dispose when reverted
+    dispose();
+  };
+
+  // Setup autoSplit if enabled
+  if (autoSplit) {
+    const target = element.parentElement;
+
+    if (!target) {
+      console.warn(
+        "SplitText: autoSplit enabled but no parent element found. AutoSplit will not work."
+      );
+    } else {
+      let skipFirst = true;
+
+      const handleResize = () => {
+        if (!isActive) return;
+
+        const currentWidth = target.offsetWidth;
+        if (currentWidth === lastWidth) return;
+        lastWidth = currentWidth;
+
+        // Restore original HTML
+        element.innerHTML = originalHTML;
+
+        // Re-split after layout is complete
+        requestAnimationFrame(() => {
+          if (!isActive) return;
+
+          // Re-measure and re-split
+          const newMeasuredWords = measureOriginalText(element);
+          const result = performSplit(
+            element,
+            newMeasuredWords,
+            charClass,
+            wordClass,
+            lineClass
+          );
+
+          // Update current result
+          currentChars = result.chars;
+          currentWords = result.words;
+          currentLines = result.lines;
+
+          // Trigger callback if provided
+          if (onResize) {
+            onResize({
+              chars: result.chars,
+              words: result.words,
+              lines: result.lines,
+            });
+          }
+        });
+      };
+
+      resizeObserver = new ResizeObserver(() => {
+        if (skipFirst) {
+          skipFirst = false;
+          return;
+        }
+
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(handleResize, 100);
+      });
+
+      resizeObserver.observe(target);
+      lastWidth = target.offsetWidth;
+    }
+  }
+
+  // Setup revertOnComplete if provided
+  if (revertOnComplete !== undefined) {
+    if (revertOnComplete instanceof Promise) {
+      revertOnComplete
+        .then(() => {
+          if (isActive) {
+            revert();
+          }
+        })
+        .catch((err) => {
+          console.warn("SplitText: revertOnComplete promise rejected:", err);
+        });
+    } else {
+      console.warn(
+        "SplitText: revertOnComplete must be a Promise. " +
+          "Pass the animation promise (e.g., animate(...).finished)"
+      );
+    }
+  }
+
+  return {
+    chars: currentChars,
+    words: currentWords,
+    lines: currentLines,
+    revert,
+    dispose,
   };
 }
