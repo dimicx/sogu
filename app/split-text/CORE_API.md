@@ -5,19 +5,19 @@ The `splitText` function is a vanilla JavaScript/TypeScript utility that splits 
 ## Installation
 
 ```typescript
-import { splitText } from './splitText';
+import { splitText } from "./splitText";
 ```
 
 ## Basic Usage
 
 ```typescript
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 const result = splitText(element);
 
 // Access split elements
-console.log(result.chars);  // Array of character spans
-console.log(result.words);  // Array of word spans
-console.log(result.lines);  // Array of line spans
+console.log(result.chars); // Array of character spans
+console.log(result.words); // Array of word spans
+console.log(result.lines); // Array of line spans
 
 // Animate them
 animate(result.words, { opacity: [0, 1] });
@@ -35,6 +35,7 @@ animate(result.words, { opacity: [0, 1] });
 #### Returns
 
 `SplitResult` object containing:
+
 - `chars`: `HTMLSpanElement[]` - Array of character spans
 - `words`: `HTMLSpanElement[]` - Array of word spans
 - `lines`: `HTMLSpanElement[]` - Array of line spans
@@ -46,12 +47,12 @@ animate(result.words, { opacity: [0, 1] });
 ```typescript
 interface SplitTextOptions {
   // CSS class names for generated spans
-  charClass?: string;      // Default: "split-char"
-  wordClass?: string;      // Default: "split-word"
-  lineClass?: string;      // Default: "split-line"
+  charClass?: string; // Default: "split-char"
+  wordClass?: string; // Default: "split-word"
+  lineClass?: string; // Default: "split-line"
 
   // Auto-split on resize
-  autoSplit?: boolean;     // Default: false
+  autoSplit?: boolean; // Default: false
 
   // Callback when resize triggers re-split
   onResize?: (result: Omit<SplitResult, "revert" | "dispose">) => void;
@@ -82,9 +83,9 @@ const result = splitText(element);
 
 ```typescript
 const result = splitText(element, {
-  charClass: 'char',
-  wordClass: 'word',
-  lineClass: 'line'
+  charClass: "char",
+  wordClass: "word",
+  lineClass: "line",
 });
 ```
 
@@ -94,16 +95,17 @@ Automatically re-splits text when the parent container resizes:
 
 ```typescript
 const result = splitText(element, {
-  autoSplit: true
+  autoSplit: true,
 });
 
 // IMPORTANT: Must call dispose() when done to prevent memory leaks
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   result.dispose();
 });
 ```
 
 **How it works:**
+
 - Observes the parent element for size changes
 - Only re-splits if width actually changed
 - Debounced (100ms) to prevent excessive re-splitting
@@ -119,11 +121,11 @@ const result = splitText(element, {
   onResize: ({ chars, words, lines }) => {
     // Optional: animate on resize
     animate(words, { opacity: [0, 1] });
-  }
+  },
 });
 
 // Don't forget to dispose!
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   result.dispose();
 });
 ```
@@ -133,13 +135,12 @@ window.addEventListener('beforeunload', () => {
 Automatically revert to original HTML after animation completes:
 
 ```typescript
-const animation = animate(
-  element.querySelectorAll('.word'),
-  { opacity: [0, 1] }
-);
+const animation = animate(element.querySelectorAll(".word"), {
+  opacity: [0, 1],
+});
 
 const result = splitText(element, {
-  revertOnComplete: animation.finished  // Pass the promise
+  revertOnComplete: animation.finished, // Pass the promise
 });
 
 // Will auto-revert and dispose when animation finishes
@@ -151,7 +152,7 @@ const result = splitText(element, {
 const result = splitText(element);
 
 // Later... restore original HTML
-result.revert();  // Also calls dispose() automatically
+result.revert(); // Also calls dispose() automatically
 ```
 
 ### 7. Dispose Resources
@@ -160,7 +161,7 @@ result.revert();  // Also calls dispose() automatically
 const result = splitText(element, { autoSplit: true });
 
 // When done (e.g., component unmount, page navigation)
-result.dispose();  // Disconnects observers, clears timers
+result.dispose(); // Disconnects observers, clears timers
 ```
 
 ## Complete Examples
@@ -168,7 +169,7 @@ result.dispose();  // Disconnects observers, clears timers
 ### Example 1: Simple Animation
 
 ```typescript
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 const result = splitText(element);
 
 animate(
@@ -181,14 +182,13 @@ animate(
 ### Example 2: Auto-Revert After Animation
 
 ```typescript
-const element = document.querySelector('h1');
-const animation = animate(
-  element.querySelectorAll('.word'),
-  { opacity: [0, 1] }
-);
+const element = document.querySelector("h1");
+const animation = animate(element.querySelectorAll(".word"), {
+  opacity: [0, 1],
+});
 
 const result = splitText(element, {
-  revertOnComplete: animation.finished
+  revertOnComplete: animation.finished,
 });
 
 // Text will automatically revert when animation completes
@@ -197,17 +197,17 @@ const result = splitText(element, {
 ### Example 3: Responsive Text Split
 
 ```typescript
-const element = document.querySelector('p');
+const element = document.querySelector("p");
 const result = splitText(element, {
   autoSplit: true,
   onResize: ({ lines }) => {
     // Re-animate when text reflows
     animate(lines, { opacity: [0, 1] });
-  }
+  },
 });
 
 // Cleanup on page navigation
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   result.dispose();
 });
 ```
@@ -215,7 +215,7 @@ window.addEventListener('beforeunload', () => {
 ### Example 4: With Font Loading
 
 ```typescript
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 
 document.fonts.ready.then(() => {
   const result = splitText(element);
@@ -232,11 +232,11 @@ Trigger animations based on scroll position or viewport visibility using Motion'
 The most common pattern - animate when element enters viewport:
 
 ```typescript
-import { splitText } from './splitText';
-import { inView } from 'motion';
-import { animate, stagger } from 'motion';
+import { splitText } from "./splitText";
+import { inView } from "motion";
+import { animate, stagger } from "motion";
 
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 const result = splitText(element);
 
 // Animate when element enters viewport
@@ -250,7 +250,7 @@ inView(
     );
   },
   {
-    amount: 0.5  // Trigger when 50% visible
+    amount: 0.5, // Trigger when 50% visible
   }
 );
 ```
@@ -262,11 +262,11 @@ By default, the callback fires just once when the element first enters the viewp
 Return a cleanup function to animate when leaving viewport:
 
 ```typescript
-import { splitText } from './splitText';
-import { inView } from 'motion';
-import { animate, stagger } from 'motion';
+import { splitText } from "./splitText";
+import { inView } from "motion";
+import { animate, stagger } from "motion";
 
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 const result = splitText(element);
 
 inView(
@@ -281,11 +281,7 @@ inView(
 
     // Return cleanup function for leaving viewport
     return () => {
-      animate(
-        result.words,
-        { opacity: 0 },
-        { duration: 0.3 }
-      );
+      animate(result.words, { opacity: 0 }, { duration: 0.3 });
     };
   },
   { amount: 0.3 }
@@ -297,10 +293,10 @@ inView(
 Create parallax or scroll-linked effects with the `scroll` function:
 
 ```typescript
-import { splitText } from './splitText';
-import { scroll } from 'motion';
+import { splitText } from "./splitText";
+import { scroll } from "motion";
 
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 const result = splitText(element);
 
 // Link animation to scroll position
@@ -308,14 +304,14 @@ scroll(
   ({ y }) => {
     result.words.forEach((word, i) => {
       // Stagger based on word index
-      const progress = Math.max(0, Math.min(1, y.progress - (i * 0.05)));
+      const progress = Math.max(0, Math.min(1, y.progress - i * 0.05));
       word.style.opacity = progress.toString();
       word.style.transform = `translateY(${(1 - progress) * 20}px)`;
     });
   },
   {
     target: element,
-    offset: ["start end", "end start"]
+    offset: ["start end", "end start"],
   }
 );
 ```
@@ -325,21 +321,17 @@ scroll(
 When using `autoSplit`, re-setup observers in the `onResize` callback:
 
 ```typescript
-import { splitText } from './splitText';
-import { inView } from 'motion';
-import { animate, stagger } from 'motion';
+import { splitText } from "./splitText";
+import { inView } from "motion";
+import { animate, stagger } from "motion";
 
-const element = document.querySelector('p');
+const element = document.querySelector("p");
 
 function setupInView(words) {
   inView(
     element,
     () => {
-      animate(
-        words,
-        { opacity: [0, 1] },
-        { delay: stagger(0.03) }
-      );
+      animate(words, { opacity: [0, 1] }, { delay: stagger(0.03) });
     },
     { amount: 0.5 }
   );
@@ -350,14 +342,14 @@ const result = splitText(element, {
   onResize: ({ words }) => {
     // Re-setup inView when text re-splits
     setupInView(words);
-  }
+  },
 });
 
 // Initial setup
 setupInView(result.words);
 
 // Cleanup on page unload
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   result.dispose();
 });
 ```
@@ -367,11 +359,11 @@ window.addEventListener('beforeunload', () => {
 Animate individual characters when scrolling into view:
 
 ```typescript
-import { splitText } from './splitText';
-import { inView } from 'motion';
-import { animate, stagger } from 'motion';
+import { splitText } from "./splitText";
+import { inView } from "motion";
+import { animate, stagger } from "motion";
 
-const element = document.querySelector('h1');
+const element = document.querySelector("h1");
 const result = splitText(element);
 
 inView(
@@ -382,7 +374,7 @@ inView(
       {
         opacity: [0, 1],
         rotateY: [90, 0],
-        filter: ['blur(4px)', 'blur(0px)']
+        filter: ["blur(4px)", "blur(0px)"],
       },
       { delay: stagger(0.02) }
     );
@@ -473,6 +465,7 @@ export interface SplitResult {
 ## Browser Compatibility
 
 Requires:
+
 - `ResizeObserver` (for autoSplit)
 - `Promise` support
 - `Range.getBoundingClientRect()`
