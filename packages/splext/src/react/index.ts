@@ -1,3 +1,3 @@
-export { SplitText } from "./SplitText";
-export type { SplitElements } from "./SplitText";
-export type { SplitTextOptions, SplitResult } from "../core/splitText";
+export { Splext } from "./Splext";
+export type { SplextElements } from "./Splext";
+export type { SplextOptions, SplextResult } from "../core/splext";

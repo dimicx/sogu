@@ -1,1 +1,1 @@
-export { splitText } from './chunk-OI2DURYO.js';
+export { splext } from './chunk-56APKNUD.js';

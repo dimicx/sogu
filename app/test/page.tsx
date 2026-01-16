@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { animate, stagger, scroll } from "motion";
-import { SplitText } from "splext/react";
+import { Splext } from "splext/react";
 
 export default function TestPage() {
   const scrollTarget17 = useRef<HTMLDivElement>(null);
@@ -13,7 +13,7 @@ export default function TestPage() {
     <div className="min-h-screen bg-zinc-950 px-8 py-24 font-sans relative">
       <div className="mx-auto max-w-4xl space-y-16 relative">
         <h1 className="text-4xl font-bold text-white">
-          SplitText Robustness Tests
+          Splext Robustness Tests
         </h1>
 
         {/* Test 1: Emoji handling */}
@@ -25,7 +25,7 @@ export default function TestPage() {
             Tests Intl.Segmenter - should handle multi-codepoint emojis
             correctly
           </p>
-          <SplitText
+          <Splext
             onSplit={({ chars }) => {
               animate(
                 chars,
@@ -37,7 +37,7 @@ export default function TestPage() {
             <p className="text-2xl text-zinc-300">
               Hello 👨‍👩‍👦 World 🎉✨ Testing emojis! 🚀
             </p>
-          </SplitText>
+          </Splext>
         </section>
 
         {/* Test 2: Em-dash wrapping */}
@@ -49,7 +49,7 @@ export default function TestPage() {
             Should wrap naturally after em-dashes
           </p>
           <div className="max-w-md">
-            <SplitText
+            <Splext
               autoSplit
               onSplit={({ lines }) => {
                 animate(
@@ -63,7 +63,7 @@ export default function TestPage() {
                 This is a test—and it should work—with proper wrapping at
                 various widths.
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -75,7 +75,7 @@ export default function TestPage() {
           <p className="text-sm text-zinc-500">
             Tests dynamic tolerance based on font size
           </p>
-          <SplitText
+          <Splext
             onSplit={({ lines }) => {
               animate(
                 lines,
@@ -87,7 +87,7 @@ export default function TestPage() {
             <p className="text-6xl font-bold leading-tight text-zinc-200">
               Large Text Should Wrap Correctly
             </p>
-          </SplitText>
+          </Splext>
         </section>
 
         {/* Test 4: CSS Custom Properties */}
@@ -98,7 +98,7 @@ export default function TestPage() {
           <p className="text-sm text-zinc-500">
             Each char should have --char-index CSS variable
           </p>
-          <SplitText
+          <Splext
             options={{ propIndex: true }}
             onSplit={({ chars }) => {
               // Animate using CSS variables
@@ -116,7 +116,7 @@ export default function TestPage() {
             }}
           >
             <p className="text-2xl text-zinc-300">Custom Properties Test</p>
-          </SplitText>
+          </Splext>
         </section>
 
         {/* Test 5: will-change optimization */}
@@ -127,7 +127,7 @@ export default function TestPage() {
           <p className="text-sm text-zinc-500">
             Elements should have will-change: transform, opacity
           </p>
-          <SplitText
+          <Splext
             options={{ willChange: true }}
             onSplit={({ words }) => {
               animate(
@@ -140,7 +140,7 @@ export default function TestPage() {
             <p className="text-xl text-zinc-300">
               Optimized for smooth animations
             </p>
-          </SplitText>
+          </Splext>
         </section>
 
         {/* Test 6: prefers-reduced-motion */}
@@ -151,7 +151,7 @@ export default function TestPage() {
           <p className="text-sm text-zinc-500">
             Check browser DevTools: System Preferences → Reduce Motion
           </p>
-          <SplitText
+          <Splext
             onSplit={({ words }) => {
               const prefersReducedMotion = window.matchMedia(
                 "(prefers-reduced-motion: reduce)"
@@ -168,7 +168,7 @@ export default function TestPage() {
             <p className="text-xl text-zinc-300">
               Respects user motion preferences
             </p>
-          </SplitText>
+          </Splext>
         </section>
 
         {/* Test 7: Empty edge case */}
@@ -180,14 +180,14 @@ export default function TestPage() {
             Single character, very long word, etc.
           </p>
           <div className="space-y-2">
-            <SplitText
+            <Splext
               onSplit={({ chars }) => {
                 animate(chars, { opacity: [0, 1] });
               }}
             >
               <p className="text-lg text-zinc-300">A</p>
-            </SplitText>
-            <SplitText
+            </Splext>
+            <Splext
               onSplit={({ chars }) => {
                 animate(chars, { opacity: [0, 1] }, { delay: stagger(0.01) });
               }}
@@ -195,7 +195,7 @@ export default function TestPage() {
               <p className="text-lg text-zinc-300">
                 Supercalifragilisticexpialidocious
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -208,7 +208,7 @@ export default function TestPage() {
             Resize window to trigger re-split with callback
           </p>
           <div className="max-w-lg">
-            <SplitText
+            <Splext
               autoSplit
               onSplit={({ lines }) => {
                 console.log("Initial split:", lines.length, "lines");
@@ -223,7 +223,7 @@ export default function TestPage() {
                 Watch the console to see the onResize callback fire. The
                 debounce is now 200ms for better stability.
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -246,7 +246,7 @@ export default function TestPage() {
             <p className="text-xs text-zinc-600">
               Full splitting with char-level animation
             </p>
-            <SplitText
+            <Splext
               onSplit={({ chars }) => {
                 animate(
                   chars,
@@ -261,7 +261,7 @@ export default function TestPage() {
               >
                 Beautiful typography matters
               </p>
-            </SplitText>
+            </Splext>
           </div>
 
           {/* Words + Lines only */}
@@ -272,7 +272,7 @@ export default function TestPage() {
             <p className="text-xs text-zinc-600">
               Skip char splitting - ligatures remain enabled, better performance
             </p>
-            <SplitText
+            <Splext
               options={{ type: "words,lines" }}
               onSplit={({ words }) => {
                 animate(
@@ -288,7 +288,7 @@ export default function TestPage() {
               >
                 Beautiful typography matters
               </p>
-            </SplitText>
+            </Splext>
           </div>
 
           {/* Lines only */}
@@ -298,7 +298,7 @@ export default function TestPage() {
               Maximum performance - only line detection
             </p>
             <div className="max-w-md">
-              <SplitText
+              <Splext
                 options={{ type: "lines" }}
                 onSplit={({ lines }) => {
                   animate(
@@ -313,7 +313,7 @@ export default function TestPage() {
                   line-by-line animations without the overhead of character
                   splitting.
                 </p>
-              </SplitText>
+              </Splext>
             </div>
           </div>
 
@@ -380,7 +380,7 @@ export default function TestPage() {
               Returns char spans only (word spans created internally for
               spacing)
             </p>
-            <SplitText
+            <Splext
               options={{ type: "chars" }}
               onSplit={({ chars, words, lines }) => {
                 console.log("chars only:", {
@@ -392,7 +392,7 @@ export default function TestPage() {
               }}
             >
               <p className="text-xl text-zinc-200">Hello World</p>
-            </SplitText>
+            </Splext>
           </div>
 
           {/* 2. words only */}
@@ -403,7 +403,7 @@ export default function TestPage() {
             <p className="text-xs text-zinc-600">
               Word spans with text content, no char spans
             </p>
-            <SplitText
+            <Splext
               options={{ type: "words" }}
               onSplit={({ chars, words, lines }) => {
                 console.log("words only:", {
@@ -415,7 +415,7 @@ export default function TestPage() {
               }}
             >
               <p className="text-xl text-zinc-200">Hello World Testing</p>
-            </SplitText>
+            </Splext>
           </div>
 
           {/* 3. lines only */}
@@ -427,7 +427,7 @@ export default function TestPage() {
               Line spans with text nodes, no word or char spans (optimized!)
             </p>
             <div className="max-w-sm">
-              <SplitText
+              <Splext
                 options={{ type: "lines" }}
                 onSplit={({ chars, words, lines }) => {
                   console.log("lines only:", {
@@ -442,7 +442,7 @@ export default function TestPage() {
                   This text should wrap into multiple lines for testing line
                   detection without unnecessary word spans.
                 </p>
-              </SplitText>
+              </Splext>
             </div>
           </div>
 
@@ -454,7 +454,7 @@ export default function TestPage() {
             <p className="text-xs text-zinc-600">
               Word spans containing char spans, no lines
             </p>
-            <SplitText
+            <Splext
               options={{ type: "chars,words" }}
               onSplit={({ chars, words, lines }) => {
                 console.log("chars,words:", {
@@ -470,7 +470,7 @@ export default function TestPage() {
               }}
             >
               <p className="text-xl text-zinc-200">Hello World</p>
-            </SplitText>
+            </Splext>
           </div>
 
           {/* 5. words,lines */}
@@ -482,7 +482,7 @@ export default function TestPage() {
               Line spans containing word spans, no char spans
             </p>
             <div className="max-w-sm">
-              <SplitText
+              <Splext
                 options={{ type: "words,lines" }}
                 onSplit={({ chars, words, lines }) => {
                   console.log("words,lines:", {
@@ -497,7 +497,7 @@ export default function TestPage() {
                   This text should wrap into multiple lines with word spans
                   inside line spans.
                 </p>
-              </SplitText>
+              </Splext>
             </div>
           </div>
 
@@ -511,7 +511,7 @@ export default function TestPage() {
               spacing)
             </p>
             <div className="max-w-sm">
-              <SplitText
+              <Splext
                 options={{ type: "chars,lines" }}
                 onSplit={({ chars, words, lines }) => {
                   console.log("chars,lines:", {
@@ -526,7 +526,7 @@ export default function TestPage() {
                   This text should wrap into multiple lines with char spans
                   directly inside line spans.
                 </p>
-              </SplitText>
+              </Splext>
             </div>
           </div>
 
@@ -539,7 +539,7 @@ export default function TestPage() {
               Full hierarchy: line spans → word spans → char spans
             </p>
             <div className="max-w-sm">
-              <SplitText
+              <Splext
                 onSplit={({ chars, words, lines }) => {
                   console.log("chars,words,lines:", {
                     chars: chars.length,
@@ -553,7 +553,7 @@ export default function TestPage() {
                   This text should have the complete hierarchy with all three
                   split types.
                 </p>
-              </SplitText>
+              </Splext>
             </div>
           </div>
 
@@ -593,7 +593,7 @@ export default function TestPage() {
             Uses built-in inView prop - no hooks needed!
           </p>
           <div className="mt-[100vh]">
-            <SplitText
+            <Splext
               onSplit={({ words }) => {
                 words.forEach((w) => (w.style.opacity = "0"));
               }}
@@ -609,7 +609,7 @@ export default function TestPage() {
               <p className="text-2xl text-zinc-200">
                 This text animates when you scroll it into view!
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -622,7 +622,7 @@ export default function TestPage() {
             Animates in when entering, animates out when leaving viewport
           </p>
           <div className="mt-[50vh] mb-[100vh]">
-            <SplitText
+            <Splext
               onSplit={({ words }) => {
                 words.forEach((w) => {
                   w.style.opacity = "0";
@@ -644,7 +644,7 @@ export default function TestPage() {
               <p className="text-2xl text-zinc-200">
                 Watch me fade in and out as you scroll!
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -657,7 +657,7 @@ export default function TestPage() {
             Animation triggers when scrolling into view with staggered timing
           </p>
           <div className="mt-[50vh] mb-[100vh]">
-            <SplitText
+            <Splext
               onSplit={({ words }) => {
                 words.forEach((w) => {
                   w.style.opacity = "0";
@@ -677,7 +677,7 @@ export default function TestPage() {
                 This animation reveals as you scroll into view with smooth
                 staggering!
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -690,7 +690,7 @@ export default function TestPage() {
             Char-by-char reveal with 3D rotation on scroll into view
           </p>
           <div className="mt-[50vh]">
-            <SplitText
+            <Splext
               onSplit={({ chars }) => {
                 chars.forEach((c) => {
                   c.style.opacity = "0";
@@ -714,7 +714,7 @@ export default function TestPage() {
               <p className="text-3xl font-bold text-zinc-200">
                 Character by character reveal
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -727,7 +727,7 @@ export default function TestPage() {
             Responsive text that re-animates on resize - no hooks needed!
           </p>
           <div className="mt-[50vh] mb-[50vh] max-w-2xl">
-            <SplitText
+            <Splext
               autoSplit
               onSplit={({ words }) => {
                 words.forEach((w) => (w.style.opacity = "0"));
@@ -760,7 +760,7 @@ export default function TestPage() {
                 the window, then scroll up and down to see the animation trigger
                 again with the new line breaks!
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -773,7 +773,7 @@ export default function TestPage() {
             Line-by-line reveal when scrolling into view
           </p>
           <div className="mt-[50vh] mb-[100vh] max-w-2xl">
-            <SplitText
+            <Splext
               onSplit={({ lines }) => {
                 lines.forEach((l) => {
                   l.style.opacity = "0";
@@ -798,7 +798,7 @@ export default function TestPage() {
                   attention to each line as the user reads.
                 </p>
               </div>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -812,7 +812,7 @@ export default function TestPage() {
             scroll() function
           </p>
           <div className="py-64 relative">
-            <SplitText
+            <Splext
               ref={scrollTarget17}
               onSplit={({ words }) => {
                 if (!scrollTarget17.current) return;
@@ -830,7 +830,7 @@ export default function TestPage() {
               <p className="text-3xl font-bold text-zinc-200">
                 Scroll to reveal each word progressively
               </p>
-            </SplitText>
+            </Splext>
           </div>
         </section>
 
@@ -844,7 +844,7 @@ export default function TestPage() {
           </p>
           <div className="h-[300vh] relative" ref={scrollTarget18}>
             <div className="sticky top-1/4">
-              <SplitText
+              <Splext
                 onSplit={({ chars }) => {
                   const animation = animate(
                     chars,
@@ -864,7 +864,7 @@ export default function TestPage() {
                 <p className="text-4xl font-bold text-zinc-200">
                   Character by character scroll reveal
                 </p>
-              </SplitText>
+              </Splext>
             </div>
           </div>
         </section> */}
@@ -879,7 +879,7 @@ export default function TestPage() {
           </p>
           <div className="h-[250vh] relative" ref={scrollTarget19}>
             <div className="sticky top-1/4 max-w-2xl">
-              <SplitText
+              <Splext
                 onSplit={({ lines }) => {
                   const animation = animate(
                     lines,
@@ -903,7 +903,7 @@ export default function TestPage() {
                     effect.
                   </p>
                 </div>
-              </SplitText>
+              </Splext>
             </div>
           </div>
         </section> */}

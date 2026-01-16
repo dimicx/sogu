@@ -1,2 +1,2 @@
-export { splitText } from "./splitText";
-export type { SplitTextOptions, SplitResult } from "./splitText";
+export { splext } from "./splext";
+export type { SplextOptions, SplextResult } from "./splext";

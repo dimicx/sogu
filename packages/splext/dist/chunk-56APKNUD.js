@@ -18,7 +18,7 @@ var __spreadValues = (a, b) => {
 };
 var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
 
-// src/core/splitText.ts
+// src/core/splext.ts
 var BREAK_CHARS = /* @__PURE__ */ new Set(["\u2014", "\u2013"]);
 function segmentGraphemes(text) {
   const segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" });
@@ -261,7 +261,7 @@ function performSplit(element, measuredWords, charClass, wordClass, lineClass, s
     }
   }
 }
-function splitText(element, {
+function splext(element, {
   type = "chars,words,lines",
   charClass = "split-char",
   wordClass = "split-word",
@@ -427,4 +427,4 @@ function splitText(element, {
   };
 }
 
-export { __spreadProps, __spreadValues, splitText };
+export { __spreadProps, __spreadValues, splext };
