@@ -10,7 +10,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       tree={source.pageTree}
       nav={{
         title: (
-          <span className="h-6 block">
+          <span className="h-5 block pl-px">
             <FettaLogo />
           </span>
         ),

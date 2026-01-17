@@ -19,22 +19,25 @@ export function FettaDefinition() {
     if (scope.current) {
       const volume = scope.current.querySelector(".vol-line");
       if (volume) {
-        animate(volume, {
-          scale: [1, 1.25, 1],
-          x: ["0px", "1.3px", "0px"],
-          transition: {
-            times: [0, 0.3, 1],
-            duration: 0.1,
+        animate(
+          volume,
+          {
+            scale: [1, 1.25, 1],
+            x: ["0px", "1.3px", "0px"],
+          },
+          {
+            times: [0, 0.35, 1],
+            duration: 0.8,
             ease: [0.25, 0.46, 0.45, 0.94],
           },
-        });
+        );
       }
     }
   };
 
   return (
     <div>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
         <span className="font-serif text-4xl italic">fetta</span>
         <div className="text-sm font-medium flex flex-col gap-1">
           <div className="flex items-center gap-2">
@@ -46,7 +49,7 @@ export function FettaDefinition() {
             </span>
             <motion.button
               onClick={playPronunciation}
-              className="size-4 cursor-pointer group"
+              className="size-6 flex items-center justify-center cursor-pointer group -ml-1"
               whileTap="tap"
               ref={scope}
             >
