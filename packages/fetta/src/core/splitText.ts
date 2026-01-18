@@ -71,9 +71,20 @@ export interface SplitTextResult {
   revert: () => void;
 }
 
+/**
+ * Information about an ancestor inline element that wraps a text node.
+ * Used to preserve nested elements like <a>, <em>, <strong> when splitting.
+ */
+interface AncestorInfo {
+  tagName: string;                    // e.g., 'em', 'a', 'strong'
+  attributes: Map<string, string>;    // all attributes preserved
+  instanceId: symbol;                 // unique ID per element instance
+}
+
 interface MeasuredChar {
   char: string;
   left: number;
+  ancestors: AncestorInfo[];  // ancestor chain from innermost to outermost
 }
 
 interface MeasuredWord {
@@ -92,6 +103,79 @@ const BREAK_CHARS = new Set([
   "‒", // figure dash (U+2012)
   "―", // horizontal bar (U+2015)
 ]);
+
+// Inline elements that should be preserved when splitting text
+const INLINE_ELEMENTS = new Set([
+  'a', 'abbr', 'acronym', 'b', 'bdi', 'bdo', 'big', 'cite', 'code',
+  'data', 'del', 'dfn', 'em', 'i', 'ins', 'kbd', 'mark', 'q', 's',
+  'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var',
+]);
+
+/**
+ * Check if two ancestor chains are equal (same elements in same order).
+ */
+function ancestorChainsEqual(a: AncestorInfo[], b: AncestorInfo[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].instanceId !== b[i].instanceId) return false;
+  }
+  return true;
+}
+
+/**
+ * Group adjacent characters by their ancestor chain.
+ * Returns array of { ancestors, chars } groups.
+ */
+function groupCharsByAncestors(
+  chars: MeasuredChar[]
+): { ancestors: AncestorInfo[]; chars: MeasuredChar[] }[] {
+  if (chars.length === 0) return [];
+
+  const groups: { ancestors: AncestorInfo[]; chars: MeasuredChar[] }[] = [];
+  let currentGroup: MeasuredChar[] = [chars[0]];
+  let currentAncestors = chars[0].ancestors;
+
+  for (let i = 1; i < chars.length; i++) {
+    const char = chars[i];
+    if (ancestorChainsEqual(char.ancestors, currentAncestors)) {
+      currentGroup.push(char);
+    } else {
+      groups.push({ ancestors: currentAncestors, chars: currentGroup });
+      currentGroup = [char];
+      currentAncestors = char.ancestors;
+    }
+  }
+
+  groups.push({ ancestors: currentAncestors, chars: currentGroup });
+  return groups;
+}
+
+/**
+ * Clone an ancestor element with its tag and all attributes.
+ */
+function cloneAncestorAsWrapper(info: AncestorInfo): HTMLElement {
+  const el = document.createElement(info.tagName);
+  info.attributes.forEach((value, key) => {
+    el.setAttribute(key, value);
+  });
+  return el;
+}
+
+/**
+ * Wrap content in nested ancestor elements (innermost to outermost order).
+ */
+function wrapInAncestors(content: Node, ancestors: AncestorInfo[]): Node {
+  if (ancestors.length === 0) return content;
+
+  // Build from innermost (first) to outermost (last)
+  let wrapped: Node = content;
+  for (let i = 0; i < ancestors.length; i++) {
+    const wrapper = cloneAncestorAsWrapper(ancestors[i]);
+    wrapper.appendChild(wrapped);
+    wrapped = wrapper;
+  }
+  return wrapped;
+}
 
 /**
  * Normalize various animation return types to a Promise.
@@ -154,12 +238,54 @@ function segmentGraphemes(text: string): string[] {
 }
 
 /**
+ * Build ancestor chain for a text node, walking up to the root element.
+ * Uses a cache to ensure consistent instanceId for each element.
+ */
+function buildAncestorChain(
+  textNode: Text,
+  rootElement: HTMLElement,
+  ancestorCache: WeakMap<Element, AncestorInfo>
+): AncestorInfo[] {
+  const ancestors: AncestorInfo[] = [];
+  let current: Node | null = textNode.parentNode;
+
+  while (current && current !== rootElement && current instanceof Element) {
+    const tagName = current.tagName.toLowerCase();
+
+    // Only include inline elements
+    if (INLINE_ELEMENTS.has(tagName)) {
+      // Check cache first for consistent instanceId
+      let info = ancestorCache.get(current);
+      if (!info) {
+        const attributes = new Map<string, string>();
+        for (const attr of current.attributes) {
+          attributes.set(attr.name, attr.value);
+        }
+        info = {
+          tagName,
+          attributes,
+          instanceId: Symbol(),
+        };
+        ancestorCache.set(current, info);
+      }
+      ancestors.push(info);
+    }
+
+    current = current.parentNode;
+  }
+
+  return ancestors;
+}
+
+/**
  * Measure character positions in the original text using Range API.
  * Splits at whitespace AND after em-dashes/en-dashes for natural wrapping.
+ * Preserves ancestor chain for each character to support nested inline elements.
  */
 function measureOriginalText(element: HTMLElement, splitChars: boolean): MeasuredWord[] {
   const range = document.createRange();
   const words: MeasuredWord[] = [];
+  const ancestorCache = new WeakMap<Element, AncestorInfo>();
 
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   let node: Text | null;
@@ -184,6 +310,9 @@ function measureOriginalText(element: HTMLElement, splitChars: boolean): Measure
   while ((node = walker.nextNode() as Text | null)) {
     const text = node.textContent || "";
 
+    // Build ancestor chain for this text node
+    const ancestors = buildAncestorChain(node, element, ancestorCache);
+
     // Segment into grapheme clusters for proper emoji/complex character handling
     const graphemes = segmentGraphemes(text);
     let charOffset = 0;
@@ -206,10 +335,10 @@ function measureOriginalText(element: HTMLElement, splitChars: boolean): Measure
           wordStartLeft = rect.left;
         }
 
-        currentWord.push({ char: grapheme, left: rect.left });
+        currentWord.push({ char: grapheme, left: rect.left, ancestors });
       } else {
         // If not splitting chars, just collect the characters without measuring
-        currentWord.push({ char: grapheme, left: 0 });
+        currentWord.push({ char: grapheme, left: 0, ancestors });
       }
 
       // Break AFTER dash characters (dash stays with preceding text)
@@ -254,6 +383,8 @@ function createSpan(
 
   span.style.display = display;
   span.style.position = "relative";
+  // Inherit text-decoration so underlines from parent <a> tags work with inline-block
+  span.style.textDecoration = "inherit";
 
   // Add will-change hint for better animation performance
   if (options?.willChange) {
@@ -352,6 +483,9 @@ function performSplit(
 
     const noSpaceBeforeSet = new Set<HTMLSpanElement>();
 
+    // Track word-level ancestors (when all chars in a word share the same ancestors)
+    const wordLevelAncestors = new Map<HTMLSpanElement, AncestorInfo[]>();
+
     // Global character index counter (for propIndex across all words)
     let globalCharIndex = 0;
 
@@ -368,92 +502,186 @@ function performSplit(
       }
 
       if (splitChars) {
-        // Add char spans to word span
-        measuredWord.chars.forEach((measuredChar, charIndex) => {
-          const charSpan = createSpan(charClass, globalCharIndex, "inline-block", {
-            propIndex: options?.propIndex,
-            willChange: options?.willChange,
-            propName: "char",
+        // Group chars by ancestor chain to handle nested inline elements
+        const charGroups = groupCharsByAncestors(measuredWord.chars);
+
+        // Check if all chars share the same ancestors (single group with ancestors)
+        const hasWordLevelAncestors = charGroups.length === 1 && charGroups[0].ancestors.length > 0;
+
+        if (hasWordLevelAncestors) {
+          // Store word-level ancestors - we'll wrap at word level later
+          wordLevelAncestors.set(wordSpan, charGroups[0].ancestors);
+        }
+
+        charGroups.forEach((group) => {
+          group.chars.forEach((measuredChar) => {
+            // Calculate original char index within the word for kerning
+            const charIndexInWord = measuredWord.chars.indexOf(measuredChar);
+
+            const charSpan = createSpan(charClass, globalCharIndex, "inline-block", {
+              propIndex: options?.propIndex,
+              willChange: options?.willChange,
+              propName: "char",
+            });
+            charSpan.textContent = measuredChar.char;
+            globalCharIndex++;
+
+            // Store expected gap for kerning compensation
+            if (charIndexInWord > 0) {
+              const prevCharLeft = measuredWord.chars[charIndexInWord - 1].left;
+              const gap = measuredChar.left - prevCharLeft;
+              charSpan.dataset.expectedGap = gap.toString();
+            }
+
+            // Wrap char in mask wrapper if mask === "chars"
+            if (options?.mask === "chars") {
+              const charWrapper = createMaskWrapper("inline-block");
+              charWrapper.appendChild(charSpan);
+              wordSpan.appendChild(charWrapper);
+            } else {
+              wordSpan.appendChild(charSpan);
+            }
+            allChars.push(charSpan);
           });
-          charSpan.textContent = measuredChar.char;
-          globalCharIndex++;
 
-          // Store expected gap for kerning compensation
-          if (charIndex > 0) {
-            const prevCharLeft = measuredWord.chars[charIndex - 1].left;
-            const gap = measuredChar.left - prevCharLeft;
-            charSpan.dataset.expectedGap = gap.toString();
-          }
+          // Only wrap at char-group level if there are mixed ancestors within the word
+          if (!hasWordLevelAncestors && group.ancestors.length > 0) {
+            // Mixed ancestors within word - wrap this char group
+            const charsToWrap = Array.from(wordSpan.childNodes);
+            const lastNChars = charsToWrap.slice(-group.chars.length);
 
-          // Wrap char in mask wrapper if mask === "chars"
-          if (options?.mask === "chars") {
-            const charWrapper = createMaskWrapper("inline-block");
-            charWrapper.appendChild(charSpan);
-            wordSpan.appendChild(charWrapper);
-          } else {
-            wordSpan.appendChild(charSpan);
+            // Remove them from wordSpan
+            lastNChars.forEach((node) => wordSpan.removeChild(node));
+
+            // Wrap them in ancestors
+            const fragment = document.createDocumentFragment();
+            lastNChars.forEach((node) => fragment.appendChild(node));
+            const wrapped = wrapInAncestors(fragment, group.ancestors);
+            wordSpan.appendChild(wrapped);
           }
-          allChars.push(charSpan);
         });
       } else {
-        // Add text directly to word span
-        wordSpan.textContent = measuredWord.chars.map((c) => c.char).join("");
+        // Group chars by ancestor chain for nested inline elements (no char splitting)
+        const charGroups = groupCharsByAncestors(measuredWord.chars);
+
+        // Check if all chars share the same ancestors
+        const hasWordLevelAncestors = charGroups.length === 1 && charGroups[0].ancestors.length > 0;
+
+        if (hasWordLevelAncestors) {
+          // Store word-level ancestors - we'll wrap at word level later
+          wordLevelAncestors.set(wordSpan, charGroups[0].ancestors);
+          // Just add text content without wrapping
+          wordSpan.textContent = measuredWord.chars.map((c) => c.char).join("");
+        } else {
+          // Mixed ancestors - wrap at char-group level
+          charGroups.forEach((group) => {
+            const text = group.chars.map((c) => c.char).join("");
+            const textNode = document.createTextNode(text);
+
+            if (group.ancestors.length > 0) {
+              const wrapped = wrapInAncestors(textNode, group.ancestors);
+              wordSpan.appendChild(wrapped);
+            } else {
+              wordSpan.appendChild(textNode);
+            }
+          });
+        }
       }
 
       allWords.push(wordSpan);
     });
 
-    // Add words to DOM with proper spacing
-    allWords.forEach((wordSpan, idx) => {
-      // Wrap word in mask wrapper if mask === "words"
-      if (options?.mask === "words") {
-        const wordWrapper = createMaskWrapper("inline-block");
-        wordWrapper.appendChild(wordSpan);
-        element.appendChild(wordWrapper);
-      } else {
-        element.appendChild(wordSpan);
-      }
-      if (
-        idx < allWords.length - 1 &&
-        !noSpaceBeforeSet.has(allWords[idx + 1])
-      ) {
-        element.appendChild(document.createTextNode(" "));
-      }
-    });
+    // Add words to DOM, grouping adjacent words with same word-level ancestors
+    let i = 0;
+    while (i < allWords.length) {
+      const wordSpan = allWords[i];
+      const ancestors = wordLevelAncestors.get(wordSpan);
 
-    // Apply kerning compensation (if splitting chars)
-    if (splitChars) {
-      allWords.forEach((wordSpan) => {
-        // When mask === "chars", wordSpan.children are wrappers, not charSpans
-        const children = Array.from(wordSpan.children) as HTMLSpanElement[];
-        if (children.length < 2) return;
-
-        // Get actual charSpans (unwrap if masked)
-        const charSpans = options?.mask === "chars"
-          ? children.map(wrapper => wrapper.firstElementChild as HTMLSpanElement)
-          : children;
-
-        const positions = children.map((c) => c.getBoundingClientRect().left);
-
-        for (let i = 1; i < children.length; i++) {
-          const charSpan = charSpans[i];
-          const targetElement = children[i]; // Apply margin to wrapper or charSpan
-          const expectedGap = charSpan.dataset.expectedGap;
-
-          if (expectedGap !== undefined) {
-            const originalGap = parseFloat(expectedGap);
-            const currentGap = positions[i] - positions[i - 1];
-            const delta = originalGap - currentGap;
-
-            if (Math.abs(delta) < 20) {
-              const roundedDelta = Math.round(delta * 100) / 100;
-              targetElement.style.marginLeft = `${roundedDelta}px`;
-            }
-
-            delete charSpan.dataset.expectedGap;
+      if (ancestors && ancestors.length > 0) {
+        // Find all adjacent words with the same ancestor chain
+        const wordGroup: HTMLSpanElement[] = [wordSpan];
+        let j = i + 1;
+        while (j < allWords.length) {
+          const nextWordSpan = allWords[j];
+          const nextAncestors = wordLevelAncestors.get(nextWordSpan);
+          // Check if next word has same ancestors AND no space-breaking dash between them
+          if (nextAncestors && ancestorChainsEqual(ancestors, nextAncestors)) {
+            wordGroup.push(nextWordSpan);
+            j++;
+          } else {
+            break;
           }
         }
-      });
+
+        // Create a single ancestor wrapper for the entire group
+        const fragment = document.createDocumentFragment();
+        wordGroup.forEach((ws, idx) => {
+          if (options?.mask === "words") {
+            const wordWrapper = createMaskWrapper("inline-block");
+            wordWrapper.appendChild(ws);
+            fragment.appendChild(wordWrapper);
+          } else {
+            fragment.appendChild(ws);
+          }
+          // Add space between words in the group (if not last and no noSpaceBefore)
+          if (idx < wordGroup.length - 1 && !noSpaceBeforeSet.has(wordGroup[idx + 1])) {
+            fragment.appendChild(document.createTextNode(" "));
+          }
+        });
+
+        const wrapped = wrapInAncestors(fragment, ancestors);
+        element.appendChild(wrapped);
+
+        // Add space after the group if needed
+        if (j < allWords.length && !noSpaceBeforeSet.has(allWords[j])) {
+          element.appendChild(document.createTextNode(" "));
+        }
+
+        i = j;
+      } else {
+        // No word-level ancestors, add directly
+        if (options?.mask === "words") {
+          const wordWrapper = createMaskWrapper("inline-block");
+          wordWrapper.appendChild(wordSpan);
+          element.appendChild(wordWrapper);
+        } else {
+          element.appendChild(wordSpan);
+        }
+        // Add space after if needed
+        if (i < allWords.length - 1 && !noSpaceBeforeSet.has(allWords[i + 1])) {
+          element.appendChild(document.createTextNode(" "));
+        }
+        i++;
+      }
+    }
+
+    // Apply kerning compensation (if splitting chars)
+    // Use allChars array directly since char spans may be nested in ancestor wrappers
+    if (splitChars && allChars.length > 1) {
+      const positions = allChars.map((c) => c.getBoundingClientRect().left);
+
+      for (let i = 1; i < allChars.length; i++) {
+        const charSpan = allChars[i];
+        const expectedGap = charSpan.dataset.expectedGap;
+
+        if (expectedGap !== undefined) {
+          const originalGap = parseFloat(expectedGap);
+          const currentGap = positions[i] - positions[i - 1];
+          const delta = originalGap - currentGap;
+
+          if (Math.abs(delta) < 20) {
+            const roundedDelta = Math.round(delta * 100) / 100;
+            // Apply margin to the char span itself
+            // (or its mask wrapper parent if present)
+            const targetElement = options?.mask === "chars" && charSpan.parentElement
+              ? charSpan.parentElement
+              : charSpan;
+            targetElement.style.marginLeft = `${roundedDelta}px`;
+          }
+
+          delete charSpan.dataset.expectedGap;
+        }
+      }
     }
 
     // Handle line grouping
@@ -471,22 +699,68 @@ function performSplit(
 
         allLines.push(lineSpan);
 
-        words.forEach((wordSpan, wordIdx) => {
-          // Wrap word in mask wrapper if mask === "words"
-          if (options?.mask === "words") {
-            const wordWrapper = createMaskWrapper("inline-block");
-            wordWrapper.appendChild(wordSpan);
-            lineSpan.appendChild(wordWrapper);
+        // Add words to line, grouping adjacent words with same word-level ancestors
+        let wi = 0;
+        while (wi < words.length) {
+          const wordSpan = words[wi];
+          const ancestors = wordLevelAncestors.get(wordSpan);
+
+          if (ancestors && ancestors.length > 0) {
+            // Find all adjacent words in this line with the same ancestor chain
+            const wordGroup: HTMLSpanElement[] = [wordSpan];
+            let wj = wi + 1;
+            while (wj < words.length) {
+              const nextWordSpan = words[wj];
+              const nextAncestors = wordLevelAncestors.get(nextWordSpan);
+              if (nextAncestors && ancestorChainsEqual(ancestors, nextAncestors)) {
+                wordGroup.push(nextWordSpan);
+                wj++;
+              } else {
+                break;
+              }
+            }
+
+            // Create a single ancestor wrapper for the group
+            const fragment = document.createDocumentFragment();
+            wordGroup.forEach((ws, idx) => {
+              if (options?.mask === "words") {
+                const wordWrapper = createMaskWrapper("inline-block");
+                wordWrapper.appendChild(ws);
+                fragment.appendChild(wordWrapper);
+              } else {
+                fragment.appendChild(ws);
+              }
+              // Add space between words in the group
+              if (idx < wordGroup.length - 1 && !noSpaceBeforeSet.has(wordGroup[idx + 1])) {
+                fragment.appendChild(document.createTextNode(" "));
+              }
+            });
+
+            const wrapped = wrapInAncestors(fragment, ancestors);
+            lineSpan.appendChild(wrapped);
+
+            // Add space after the group if needed
+            if (wj < words.length && !noSpaceBeforeSet.has(words[wj])) {
+              lineSpan.appendChild(document.createTextNode(" "));
+            }
+
+            wi = wj;
           } else {
-            lineSpan.appendChild(wordSpan);
+            // No word-level ancestors, add directly
+            if (options?.mask === "words") {
+              const wordWrapper = createMaskWrapper("inline-block");
+              wordWrapper.appendChild(wordSpan);
+              lineSpan.appendChild(wordWrapper);
+            } else {
+              lineSpan.appendChild(wordSpan);
+            }
+            // Add space after if needed
+            if (wi < words.length - 1 && !noSpaceBeforeSet.has(words[wi + 1])) {
+              lineSpan.appendChild(document.createTextNode(" "));
+            }
+            wi++;
           }
-          if (
-            wordIdx < words.length - 1 &&
-            !noSpaceBeforeSet.has(words[wordIdx + 1])
-          ) {
-            lineSpan.appendChild(document.createTextNode(" "));
-          }
-        });
+        }
 
         // Wrap line in mask wrapper if mask === "lines"
         if (options?.mask === "lines") {

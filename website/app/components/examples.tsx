@@ -243,6 +243,29 @@ export function EmojiSupport() {
   );
 }
 
+export function NestedElements() {
+  return (
+    <SplitText
+      onSplit={({ chars }) => {
+        animate(
+          chars,
+          { opacity: [0, 1], y: [10, 0] },
+          { delay: stagger(0.02), duration: 0.3 },
+        );
+      }}
+    >
+      <p className="text-2xl text-center">
+        Click{" "}
+        <a href="#" className="text-fd-primary no-underline">
+          <em>this link</em>
+        </a>{" "}
+        or see <em className="italic">emphasized</em> and{" "}
+        <strong className="font-bold">bold</strong> text
+      </p>
+    </SplitText>
+  );
+}
+
 export function ResponsiveSplit() {
   return (
     <div className="w-full">
@@ -324,6 +347,32 @@ export function LineByLineVanilla() {
     <p ref={ref} className="text-lg max-w-md text-center">
       This paragraph animates line by line. Each line slides in from the left.
     </p>
+  );
+}
+
+const NESTED_ELEMENTS_HTML = `Click <a href="#" class="text-fd-primary underline">this link</a> or see <em class="italic">emphasized</em> and <strong class="font-bold">bold</strong> text`;
+
+export function NestedElementsVanilla() {
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    // Reset to original HTML before splitting (handles React StrictMode double-execution)
+    ref.current.innerHTML = NESTED_ELEMENTS_HTML;
+    const { chars } = splitText(ref.current);
+    animate(
+      chars,
+      { opacity: [0, 1], y: [10, 0] },
+      { delay: stagger(0.02), duration: 0.3 },
+    );
+  }, []);
+
+  return (
+    <p
+      ref={ref}
+      className="text-2xl text-center"
+      dangerouslySetInnerHTML={{ __html: NESTED_ELEMENTS_HTML }}
+    />
   );
 }
 

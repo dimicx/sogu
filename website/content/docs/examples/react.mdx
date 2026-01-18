@@ -4,7 +4,7 @@ description: Common animation patterns with Fetta and React.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-import { BasicFadeIn, CharacterReveal, EmojiSupport, LineByLine, MaskedLineReveal, ResponsiveSplit, ScrollTriggered, ScrollDriven, AutoRevert } from "../../../app/components/examples";
+import { BasicFadeIn, CharacterReveal, EmojiSupport, NestedElements, LineByLine, MaskedLineReveal, ResponsiveSplit, ScrollTriggered, ScrollDriven, AutoRevert } from "../../../app/components/examples";
 import { ExampleWrapper, ResizableExampleWrapper } from "../../../app/components/example-wrapper";
 
 # React Examples
@@ -93,6 +93,37 @@ Fetta correctly handles compound emojis like family groups, flags, and skin tone
   }}
 >
   <p>Family: 👨‍👩‍👧‍👦 Flag: 🇯🇵 Skin: 👋🏽</p>
+</SplitText>
+```
+  </Tab>
+</Tabs>
+
+## Nested Elements
+
+Fetta preserves inline HTML elements like `<a>`, `<em>`, and `<strong>` when splitting text. All attributes (href, class, id, data-\*, etc.) are maintained on the split output.
+
+<Tabs items={['Preview', 'Code']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl">
+      <ExampleWrapper>
+        <NestedElements />
+      </ExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="Code" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```tsx
+<SplitText
+  onSplit={({ chars }) => {
+    animate(
+      chars,
+      { opacity: [0, 1], y: [10, 0] },
+      { delay: stagger(0.02), duration: 0.3 }
+    );
+  }}
+>
+  <p>
+    Click <a href="#">this link</a> or see <em>emphasized</em> and <strong>bold</strong> text
+  </p>
 </SplitText>
 ```
   </Tab>
