@@ -30,7 +30,7 @@ export function BasicFadeIn() {
         );
       }}
     >
-      <h2 className="text-3xl font-bold my-0!">Fade in each word</h2>
+      <p className="text-3xl font-medium my-0!">Fade in each word</p>
     </SplitText>
   );
 }
@@ -46,7 +46,7 @@ export function CharacterReveal() {
         );
       }}
     >
-      <h2 className="text-3xl font-bold my-0!">Character by character</h2>
+      <p className="text-3xl font-medium my-0!">Character by character</p>
     </SplitText>
   );
 }
@@ -113,7 +113,7 @@ export function ScrollTriggered() {
             });
           }}
         >
-          <h2 className="text-2xl font-bold my-0!">Reveals on scroll</h2>
+          <p className="text-2xl font-medium my-0!">Reveals on scroll</p>
         </SplitText>
       </div>
     </div>
@@ -171,7 +171,7 @@ export function ScrollDriven() {
             }}
             options={{ type: "words" }}
           >
-            <p className="text-2xl font-bold text-center max-w-xs">
+            <p className="text-2xl font-medium text-center max-w-xs">
               Each word reveals as you scroll through this container
             </p>
           </SplitText>
@@ -200,7 +200,9 @@ export function AutoRevert() {
         }}
         revertOnComplete
       >
-        <h2 className="text-3xl font-bold my-0!">Auto-revert after animation</h2>
+        <p className="text-3xl font-medium my-0!">
+          Auto-revert after animation
+        </p>
       </SplitText>
     </>
   );
@@ -236,9 +238,7 @@ export function EmojiSupport() {
         );
       }}
     >
-      <p className="text-3xl text-center">
-        Family: 👨‍👩‍👧‍👦 Flag: 🇯🇵 Skin: 👋🏽
-      </p>
+      <p className="text-3xl text-center">Family: 👨‍👩‍👧‍👦 Flag: 🇯🇵 Skin: 👋🏽</p>
     </SplitText>
   );
 }
@@ -257,7 +257,8 @@ export function ResponsiveSplit() {
         }}
       >
         <p className="text-lg w-full text-center">
-          This text reflows naturally at any width, with lines recalculated on resize.
+          This text reflows naturally at any width, with lines recalculated on
+          resize.
         </p>
       </SplitText>
     </div>
@@ -280,9 +281,9 @@ export function BasicFadeInVanilla() {
   }, []);
 
   return (
-    <h2 ref={ref} className="text-3xl font-bold my-0!">
+    <p ref={ref} className="text-3xl font-medium my-0!">
       Fade in each word
-    </h2>
+    </p>
   );
 }
 
@@ -300,9 +301,9 @@ export function CharacterRevealVanilla() {
   }, []);
 
   return (
-    <h2 ref={ref} className="text-3xl font-bold my-0!">
+    <p ref={ref} className="text-3xl font-medium my-0!">
       Character by character
-    </h2>
+    </p>
   );
 }
 
@@ -369,7 +370,7 @@ export function AutoRevertVanilla() {
 
     // Reset to original text before splitting (handles React StrictMode double-execution)
     ref.current.textContent = AUTO_REVERT_TEXT;
-    setStatus("animating");
+    queueMicrotask(() => setStatus("animating"));
 
     splitText(ref.current, {
       onSplit: ({ chars }) => {
@@ -388,9 +389,9 @@ export function AutoRevertVanilla() {
   return (
     <>
       <StatusIndicator status={status} />
-      <h2 ref={ref} className="text-3xl font-bold my-0!">
+      <p ref={ref} className="text-3xl font-medium my-0!">
         {AUTO_REVERT_TEXT}
-      </h2>
+      </p>
     </>
   );
 }
@@ -452,9 +453,9 @@ export function WithGSAPVanilla() {
   }, []);
 
   return (
-    <h2 ref={ref} className="text-3xl font-bold my-0!">
+    <p ref={ref} className="text-3xl font-medium my-0!">
       Animated with GSAP
-    </h2>
+    </p>
   );
 }
 
@@ -524,9 +525,9 @@ export function ScrollTriggeredVanilla() {
         <span className="text-sm">Scroll down</span>
       </div>
       <div className="flex items-center justify-center h-full">
-        <h2 ref={textRef} className="text-2xl font-bold my-0!">
+        <p ref={textRef} className="text-2xl font-medium my-0!">
           {SCROLL_TRIGGERED_TEXT}
-        </h2>
+        </p>
       </div>
     </div>
   );
@@ -544,7 +545,7 @@ export function CSSOnlyVanilla() {
   }, []);
 
   return (
-    <p ref={ref} className="text-3xl font-bold my-0! css-only-example">
+    <p ref={ref} className="text-3xl font-medium my-0! css-only-example">
       {CSS_ONLY_TEXT}
     </p>
   );
@@ -608,7 +609,10 @@ export function ScrollDrivenVanilla() {
       </div>
       <div className="flex items-center justify-center min-h-full">
         <div ref={targetRef}>
-          <p ref={textRef} className="text-2xl font-bold text-center max-w-xs">
+          <p
+            ref={textRef}
+            className="text-2xl font-medium text-center max-w-xs"
+          >
             {SCROLL_DRIVEN_TEXT}
           </p>
         </div>

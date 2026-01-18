@@ -28,7 +28,7 @@ Split text into words and animate each one with a staggered fade and slide effec
 import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
-const element = document.querySelector('h1');
+const element = document.querySelector('p');
 const { words } = splitText(element);
 
 animate(
@@ -57,7 +57,7 @@ Animate each character individually for a more granular effect. Great for headin
 import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
-const element = document.querySelector('h1');
+const element = document.querySelector('p');
 const { chars } = splitText(element);
 
 animate(
@@ -149,7 +149,7 @@ Use `onSplit` with `revertOnComplete: true` to automatically restore the origina
 import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
-const element = document.querySelector('h1');
+const element = document.querySelector('p');
 
 splitText(element, {
   onSplit: ({ chars }) =>
@@ -215,7 +215,7 @@ Use Motion's `inView` to detect when the element enters the viewport and trigger
 import { splitText } from 'fetta';
 import { animate, stagger, inView } from 'motion';
 
-const element = document.querySelector('h1');
+const element = document.querySelector('p');
 const { words } = splitText(element);
 
 // Hide words initially
@@ -290,7 +290,7 @@ Fetta works with any animation library. Here's an example using GSAP.
 import { splitText } from 'fetta';
 import gsap from 'gsap';
 
-const element = document.querySelector('h1');
+const element = document.querySelector('p');
 const { words } = splitText(element);
 
 gsap.from(words, {
@@ -320,7 +320,7 @@ Use `propIndex` to add CSS variables (`--char-index`, `--word-index`, `--line-in
 ```ts
 import { splitText } from 'fetta';
 
-const element = document.querySelector('h1');
+const element = document.querySelector('p');
 splitText(element, { propIndex: true });
 ```
   </Tab>

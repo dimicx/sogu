@@ -2,8 +2,8 @@
 
 import { useRef } from "react";
 import { ItalianFlag } from "./icons/italian-flag";
-import { VolumeUp } from "./icons/volume-up";
-import { motion, useAnimate } from "motion/react";
+import { motion, stagger, useAnimate } from "motion/react";
+import { Volume } from "./icons/volume";
 
 export function FettaDefinition() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -17,21 +17,19 @@ export function FettaDefinition() {
     audioRef.current.play();
 
     if (scope.current) {
-      const volume = scope.current.querySelector(".vol-line");
-      if (volume) {
-        animate(
-          volume,
-          {
-            scale: [1, 1.25, 1],
-            x: ["0px", "1.3px", "0px"],
-          },
-          {
-            times: [0, 0.35, 1],
-            duration: 0.8,
-            ease: [0.25, 0.46, 0.45, 0.94],
-          },
-        );
-      }
+      animate(
+        ".vol-line",
+        {
+          scale: [1, 1.2, 1],
+          x: ["0px", "1px", "0px"],
+        },
+        {
+          times: [0, 0.35, 1],
+          duration: 0.75,
+          ease: [0.25, 0.46, 0.45, 0.94],
+          delay: stagger(0.075),
+        },
+      );
     }
   };
 
@@ -39,7 +37,7 @@ export function FettaDefinition() {
     <div>
       <div className="flex flex-col gap-3">
         <span className="font-serif text-4xl italic">fetta</span>
-        <div className="text-sm font-medium flex flex-col gap-1">
+        <div className="text-sm flex flex-col gap-1">
           <div className="flex items-center gap-2">
             <span className="h-4">
               <ItalianFlag />
@@ -49,13 +47,13 @@ export function FettaDefinition() {
             </span>
             <motion.button
               onClick={playPronunciation}
-              className="size-6 flex items-center justify-center cursor-pointer group -ml-1"
+              className="size-6 flex items-center justify-center cursor-pointer group text-fd-muted-foreground hover:text-fd-foreground active:scale-95 transition-all duration-150 ease-out focus-visible:outline-none will-change-transform focus-visible:ring-2 focus-visible:ring-fd-ring bg-fd-secondary hover:bg-fd-accent active:bg-fd-accent rounded-md"
               whileTap="tap"
               ref={scope}
             >
               <span className="sr-only">Listen to the pronunciation</span>
-              <span className="inline-block size-4 group-active:scale-95 transition-transform duration-150 ease-out">
-                <VolumeUp />
+              <span className="inline-block size-4">
+                <Volume />
               </span>
             </motion.button>
           </div>

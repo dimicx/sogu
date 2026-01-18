@@ -12,10 +12,10 @@ function ReplayIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="lucide lucide-rotate-ccw"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      className="lucide lucide-rotate-ccw-icon lucide-rotate-ccw h-full w-auto"
       aria-hidden="true"
     >
       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
@@ -29,11 +29,11 @@ export function ExampleWrapper({ children }: { children: ReactNode }) {
 
   return (
     <div className="relative w-full h-[240px] lg:h-[300px]">
-      <div className="empty:hidden absolute top-3 right-2 z-2 backdrop-blur-lg rounded-lg text-fd-muted-foreground">
+      <div className="empty:hidden absolute top-3 right-2 z-2">
         <button
           type="button"
           onClick={() => setKey((k) => k + 1)}
-          className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors duration-100 disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring p-1 [&_svg]:size-4 hover:text-fd-accent-foreground"
+          className="inline-flex items-center justify-center rounded-md text-fd-muted-foreground text-sm font-medium transition-colors duration-100 disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring p-1 [&_svg]:size-4 hover:text-fd-accent-foreground"
           aria-label="Replay animation"
         >
           <ReplayIcon />
@@ -55,9 +55,10 @@ function DragHandle() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      className="lucide lucide-grip-vertical-icon lucide-grip-vertical h-full w-auto"
       aria-hidden="true"
     >
       <circle cx="9" cy="12" r="1" />
@@ -112,7 +113,7 @@ export function ResizableExampleWrapper({ children }: { children: ReactNode }) {
               const deltaPercent = (info.delta.x / containerWidth) * 100;
               setWidth((w) => Math.max(30, Math.min(100, w + deltaPercent)));
             }}
-            className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 z-10 cursor-ew-resize p-1 rounded bg-fd-secondary text-fd-muted-foreground hover:text-fd-accent-foreground hover:bg-fd-accent transition-colors"
+            className="absolute right-0 top-1/2 h-7 translate-x-1/2 -translate-y-1/2 z-10 cursor-ew-resize py-1 rounded bg-fd-secondary text-fd-muted-foreground hover:text-fd-accent-foreground hover:bg-fd-accent transition-colors"
             aria-label="Drag to resize"
           >
             <DragHandle />
