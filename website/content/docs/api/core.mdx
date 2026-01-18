@@ -27,6 +27,7 @@ const { chars, words, lines } = splitText(element, options);
 | `charClass` | `string` | `"split-char"` | CSS class for character spans |
 | `wordClass` | `string` | `"split-word"` | CSS class for word spans |
 | `lineClass` | `string` | `"split-line"` | CSS class for line spans |
+| `mask` | `string` | — | Wrap elements in `overflow: clip` container: `"chars"`, `"words"`, or `"lines"` |
 | `autoSplit` | `boolean` | `false` | Re-split on container resize |
 | `onResize` | `function` | — | Callback after re-split |
 | `onSplit` | `function` | — | Callback after initial split. Return animation for `revertOnComplete` |
@@ -80,6 +81,20 @@ splitText(element, {
   autoSplit: true,
   onResize: ({ lines }) => {
     animate(lines, { opacity: [0, 1] });
+  }
+});
+```
+
+### Masked Reveal
+
+Use `mask` to wrap elements in a clipping container for clean reveal animations. Content can slide into view from outside its bounds.
+
+```ts title="main.ts"
+splitText(element, {
+  type: 'lines',
+  mask: 'lines',
+  onSplit: ({ lines }) => {
+    animate(lines, { y: ['100%', '0%'] }, { delay: stagger(0.1) });
   }
 });
 ```

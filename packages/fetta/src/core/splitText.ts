@@ -17,6 +17,8 @@ export interface SplitTextOptions {
   charClass?: string;
   wordClass?: string;
   lineClass?: string;
+  /** Apply overflow mask wrapper to elements for reveal animations */
+  mask?: "lines" | "words" | "chars";
   /** Auto-split on resize (observes parent element) */
   autoSplit?: boolean;
   /** Callback when resize triggers re-split (does not re-trigger initial animations) */
@@ -208,6 +210,19 @@ function createSpan(
 }
 
 /**
+ * Create a mask wrapper element with overflow: clip for reveal animations.
+ */
+function createMaskWrapper(
+  display: "inline-block" | "block" = "inline-block"
+): HTMLSpanElement {
+  const wrapper = document.createElement("span");
+  wrapper.style.display = display;
+  wrapper.style.position = "relative";
+  wrapper.style.overflow = "clip";
+  return wrapper;
+}
+
+/**
  * Group elements into lines based on their Y position.
  * Generic function that works with any element type (word spans, char spans, or text nodes).
  */
@@ -261,7 +276,7 @@ function performSplit(
   splitChars: boolean,
   splitWords: boolean,
   splitLines: boolean,
-  options?: { propIndex?: boolean; willChange?: boolean }
+  options?: { propIndex?: boolean; willChange?: boolean; mask?: "lines" | "words" | "chars" }
 ): {
   chars: HTMLSpanElement[];
   words: HTMLSpanElement[];
@@ -312,7 +327,14 @@ function performSplit(
             charSpan.dataset.expectedGap = gap.toString();
           }
 
-          wordSpan.appendChild(charSpan);
+          // Wrap char in mask wrapper if mask === "chars"
+          if (options?.mask === "chars") {
+            const charWrapper = createMaskWrapper("inline-block");
+            charWrapper.appendChild(charSpan);
+            wordSpan.appendChild(charWrapper);
+          } else {
+            wordSpan.appendChild(charSpan);
+          }
           allChars.push(charSpan);
         });
       } else {
@@ -325,7 +347,14 @@ function performSplit(
 
     // Add words to DOM with proper spacing
     allWords.forEach((wordSpan, idx) => {
-      element.appendChild(wordSpan);
+      // Wrap word in mask wrapper if mask === "words"
+      if (options?.mask === "words") {
+        const wordWrapper = createMaskWrapper("inline-block");
+        wordWrapper.appendChild(wordSpan);
+        element.appendChild(wordWrapper);
+      } else {
+        element.appendChild(wordSpan);
+      }
       if (
         idx < allWords.length - 1 &&
         !noSpaceBeforeSet.has(allWords[idx + 1])
@@ -337,13 +366,20 @@ function performSplit(
     // Apply kerning compensation (if splitting chars)
     if (splitChars) {
       allWords.forEach((wordSpan) => {
-        const chars = Array.from(wordSpan.children) as HTMLSpanElement[];
-        if (chars.length < 2) return;
+        // When mask === "chars", wordSpan.children are wrappers, not charSpans
+        const children = Array.from(wordSpan.children) as HTMLSpanElement[];
+        if (children.length < 2) return;
 
-        const positions = chars.map((c) => c.getBoundingClientRect().left);
+        // Get actual charSpans (unwrap if masked)
+        const charSpans = options?.mask === "chars"
+          ? children.map(wrapper => wrapper.firstElementChild as HTMLSpanElement)
+          : children;
 
-        for (let i = 1; i < chars.length; i++) {
-          const charSpan = chars[i];
+        const positions = children.map((c) => c.getBoundingClientRect().left);
+
+        for (let i = 1; i < children.length; i++) {
+          const charSpan = charSpans[i];
+          const targetElement = children[i]; // Apply margin to wrapper or charSpan
           const expectedGap = charSpan.dataset.expectedGap;
 
           if (expectedGap !== undefined) {
@@ -353,7 +389,7 @@ function performSplit(
 
             if (Math.abs(delta) < 20) {
               const roundedDelta = Math.round(delta * 100) / 100;
-              charSpan.style.marginLeft = `${roundedDelta}px`;
+              targetElement.style.marginLeft = `${roundedDelta}px`;
             }
 
             delete charSpan.dataset.expectedGap;
@@ -378,7 +414,14 @@ function performSplit(
         allLines.push(lineSpan);
 
         words.forEach((wordSpan, wordIdx) => {
-          lineSpan.appendChild(wordSpan);
+          // Wrap word in mask wrapper if mask === "words"
+          if (options?.mask === "words") {
+            const wordWrapper = createMaskWrapper("inline-block");
+            wordWrapper.appendChild(wordSpan);
+            lineSpan.appendChild(wordWrapper);
+          } else {
+            lineSpan.appendChild(wordSpan);
+          }
           if (
             wordIdx < words.length - 1 &&
             !noSpaceBeforeSet.has(words[wordIdx + 1])
@@ -387,7 +430,14 @@ function performSplit(
           }
         });
 
-        element.appendChild(lineSpan);
+        // Wrap line in mask wrapper if mask === "lines"
+        if (options?.mask === "lines") {
+          const lineWrapper = createMaskWrapper("block");
+          lineWrapper.appendChild(lineSpan);
+          element.appendChild(lineWrapper);
+        } else {
+          element.appendChild(lineSpan);
+        }
       });
 
       // Return only what user requested (words might have been created internally for spacing)
@@ -470,7 +520,14 @@ function performSplit(
             }
           });
 
-          element.appendChild(lineSpan);
+          // Wrap line in mask wrapper if mask === "lines"
+          if (options?.mask === "lines") {
+            const lineWrapper = createMaskWrapper("block");
+            lineWrapper.appendChild(lineSpan);
+            element.appendChild(lineWrapper);
+          } else {
+            element.appendChild(lineSpan);
+          }
         });
 
       return { chars: [], words: [], lines: allLines };
@@ -496,6 +553,7 @@ export function splitText(
     charClass = "split-char",
     wordClass = "split-word",
     lineClass = "split-line",
+    mask,
     autoSplit = false,
     onResize,
     onSplit,
@@ -573,7 +631,7 @@ export function splitText(
     splitChars,
     splitWords,
     splitLines,
-    { propIndex, willChange }
+    { propIndex, willChange, mask }
   );
 
   // Store initial result
@@ -666,7 +724,7 @@ export function splitText(
             splitChars,
             splitWords,
             splitLines,
-            { propIndex, willChange }
+            { propIndex, willChange, mask }
           );
 
           // Update current result

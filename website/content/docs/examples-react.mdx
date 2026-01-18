@@ -4,7 +4,7 @@ description: Common animation patterns with Fetta and React.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-import { BasicFadeIn, CharacterReveal, LineByLine, ScrollTriggered, ScrollDriven, AutoRevert } from "../../app/components/examples";
+import { BasicFadeIn, CharacterReveal, LineByLine, MaskedLineReveal, ScrollTriggered, ScrollDriven, AutoRevert } from "../../app/components/examples";
 import { ExampleWrapper } from "../../app/components/example-wrapper";
 
 # React Examples
@@ -96,6 +96,36 @@ Lines are detected based on actual rendered positions, so this works with any te
     This paragraph animates line by line.
     Each line slides in from the left.
   </p>
+</SplitText>
+```
+  </Tab>
+</Tabs>
+
+## Masked Line Reveal
+
+Use the `mask` option to wrap elements in a clipping container with `overflow: clip`. This creates clean reveal animations where content slides into view from outside its bounds.
+
+<Tabs items={['Preview', 'Code']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl">
+      <ExampleWrapper>
+        <MaskedLineReveal />
+      </ExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="Code" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```tsx
+<SplitText
+  onSplit={({ lines }) => {
+    animate(
+      lines,
+      { y: ["100%", "0%"] },
+      { delay: stagger(0.1), duration: 0.5 }
+    );
+  }}
+  options={{ type: "lines", mask: "lines" }}
+>
+  <p>Each line reveals from below with a clipping mask.</p>
 </SplitText>
 ```
   </Tab>

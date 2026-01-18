@@ -177,6 +177,25 @@ export function AutoRevert() {
   );
 }
 
+export function MaskedLineReveal() {
+  return (
+    <SplitText
+      onSplit={({ lines }) => {
+        animate(
+          lines,
+          { y: ["100%", "0%"] },
+          { delay: stagger(0.1), duration: 0.5, ease: [0.25, 1, 0.5, 1] },
+        );
+      }}
+      options={{ type: "lines", mask: "lines" }}
+    >
+      <p className="text-lg max-w-md text-center">
+        Each line reveals from below with a clipping mask for a clean effect.
+      </p>
+    </SplitText>
+  );
+}
+
 // Vanilla examples using splitText directly
 
 export function BasicFadeInVanilla() {
@@ -235,6 +254,38 @@ export function LineByLineVanilla() {
   return (
     <p ref={ref} className="text-lg max-w-md text-center">
       This paragraph animates line by line. Each line slides in from the left.
+    </p>
+  );
+}
+
+const MASKED_LINE_REVEAL_TEXT =
+  "Each line reveals from below with a clipping mask for a clean effect.";
+
+export function MaskedLineRevealVanilla() {
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+
+    // Reset to original text before splitting (handles React StrictMode double-execution)
+    ref.current.textContent = MASKED_LINE_REVEAL_TEXT;
+
+    splitText(ref.current, {
+      type: "lines",
+      mask: "lines",
+      onSplit: ({ lines }) => {
+        animate(
+          lines,
+          { y: ["100%", "0%"] },
+          { delay: stagger(0.1), duration: 0.5, ease: [0.25, 1, 0.5, 1] },
+        );
+      },
+    });
+  }, []);
+
+  return (
+    <p ref={ref} className="text-lg max-w-md text-center">
+      {MASKED_LINE_REVEAL_TEXT}
     </p>
   );
 }

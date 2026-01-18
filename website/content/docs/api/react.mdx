@@ -26,6 +26,18 @@ import { SplitText } from 'fetta/react';
 | `onLeaveView` | `function` | — | Called when leaving viewport |
 | `ref` | `Ref` | — | Ref to container element |
 
+### options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `type` | `string` | `"chars,words,lines"` | What to split: `"chars"`, `"words"`, `"lines"`, or combinations |
+| `charClass` | `string` | `"split-char"` | CSS class for character spans |
+| `wordClass` | `string` | `"split-word"` | CSS class for word spans |
+| `lineClass` | `string` | `"split-line"` | CSS class for line spans |
+| `mask` | `string` | — | Wrap elements in `overflow: clip` container: `"chars"`, `"words"`, or `"lines"` |
+| `propIndex` | `boolean` | `false` | Add CSS custom properties for indices |
+| `willChange` | `boolean` | `false` | Add `will-change: transform, opacity` hint |
+
 ## Callback Signature
 
 All callbacks receive the same result object:
@@ -94,6 +106,21 @@ Enable `revertOnComplete` and return an animation from your callback. The origin
   }}
 >
   <h1>Reverts after animation</h1>
+</SplitText>
+```
+
+## Masked Reveal
+
+Use `mask` in options to wrap elements in a clipping container. Content slides into view from outside its bounds.
+
+```tsx title="App.tsx"
+<SplitText
+  options={{ type: 'lines', mask: 'lines' }}
+  onSplit={({ lines }) => {
+    animate(lines, { y: ['100%', '0%'] }, { delay: stagger(0.1) });
+  }}
+>
+  <p>Each line reveals from below</p>
 </SplitText>
 ```
 

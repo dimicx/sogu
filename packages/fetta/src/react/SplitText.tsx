@@ -23,6 +23,8 @@ interface SplitTextOptions {
   charClass?: string;
   wordClass?: string;
   lineClass?: string;
+  /** Apply overflow mask wrapper to elements for reveal animations */
+  mask?: "lines" | "words" | "chars";
   propIndex?: boolean;
   willChange?: boolean;
 }

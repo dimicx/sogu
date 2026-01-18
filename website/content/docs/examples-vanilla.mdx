@@ -4,7 +4,7 @@ description: Common animation patterns with Fetta and vanilla JavaScript.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-import { BasicFadeInVanilla, CharacterRevealVanilla, LineByLineVanilla, AutoRevertVanilla, ResponsiveSplitVanilla, WithGSAPVanilla } from "../../app/components/examples";
+import { BasicFadeInVanilla, CharacterRevealVanilla, LineByLineVanilla, MaskedLineRevealVanilla, AutoRevertVanilla, ResponsiveSplitVanilla, WithGSAPVanilla } from "../../app/components/examples";
 import { ExampleWrapper, ResizableExampleWrapper } from "../../app/components/example-wrapper";
 
 # Vanilla Examples
@@ -94,6 +94,40 @@ animate(
   { opacity: [0, 1], x: [-20, 0] },
   { delay: stagger(0.1), duration: 0.6 }
 );
+```
+  </Tab>
+</Tabs>
+
+## Masked Line Reveal
+
+Use the `mask` option to wrap elements in a clipping container with `overflow: clip`. This creates clean reveal animations where content slides into view from outside its bounds.
+
+<Tabs items={['Preview', 'Code']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl">
+      <ExampleWrapper>
+        <MaskedLineRevealVanilla />
+      </ExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="Code" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```ts
+import { splitText } from 'fetta';
+import { animate, stagger } from 'motion';
+
+const element = document.querySelector('p');
+
+splitText(element, {
+  type: 'lines',
+  mask: 'lines',
+  onSplit: ({ lines }) => {
+    animate(
+      lines,
+      { y: ['100%', '0%'] },
+      { delay: stagger(0.1), duration: 0.5 }
+    );
+  }
+});
 ```
   </Tab>
 </Tabs>
