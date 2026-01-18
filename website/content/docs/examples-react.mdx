@@ -4,8 +4,8 @@ description: Common animation patterns with Fetta and React.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-import { BasicFadeIn, CharacterReveal, LineByLine, MaskedLineReveal, ScrollTriggered, ScrollDriven, AutoRevert } from "../../app/components/examples";
-import { ExampleWrapper } from "../../app/components/example-wrapper";
+import { BasicFadeIn, CharacterReveal, LineByLine, MaskedLineReveal, ResponsiveSplit, ScrollTriggered, ScrollDriven, AutoRevert } from "../../app/components/examples";
+import { ExampleWrapper, ResizableExampleWrapper } from "../../app/components/example-wrapper";
 
 # React Examples
 
@@ -126,6 +126,36 @@ Use the `mask` option to wrap elements in a clipping container with `overflow: c
   options={{ type: "lines", mask: "lines" }}
 >
   <p>Each line reveals from below with a clipping mask.</p>
+</SplitText>
+```
+  </Tab>
+</Tabs>
+
+## Responsive Split
+
+Enable `autoSplit` to automatically re-split text when the container resizes. Use `onResize` to re-trigger animations when the text reflows to different lines.
+
+<Tabs items={['Preview', 'Code']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl overflow-hidden">
+      <ResizableExampleWrapper>
+        <ResponsiveSplit />
+      </ResizableExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="Code" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```tsx
+<SplitText
+  autoSplit
+  onSplit={({ lines }) => {
+    animate(
+      lines,
+      { opacity: [0, 1], y: [12, 0] },
+      { delay: stagger(0.08), duration: 0.4 }
+    );
+  }}
+>
+  <p>Resize the window to see this text re-split and animate again.</p>
 </SplitText>
 ```
   </Tab>

@@ -4,7 +4,7 @@ description: Common animation patterns with Fetta and vanilla JavaScript.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-import { BasicFadeInVanilla, CharacterRevealVanilla, LineByLineVanilla, MaskedLineRevealVanilla, AutoRevertVanilla, ResponsiveSplitVanilla, WithGSAPVanilla } from "../../app/components/examples";
+import { BasicFadeInVanilla, CharacterRevealVanilla, LineByLineVanilla, MaskedLineRevealVanilla, AutoRevertVanilla, ResponsiveSplitVanilla, ScrollTriggeredVanilla, ScrollDrivenVanilla, WithGSAPVanilla, CSSOnlyVanilla } from "../../app/components/examples";
 import { ExampleWrapper, ResizableExampleWrapper } from "../../app/components/example-wrapper";
 
 # Vanilla Examples
@@ -198,6 +198,78 @@ result.revert();
   </Tab>
 </Tabs>
 
+## Scroll-Triggered
+
+Use `IntersectionObserver` to detect when the element enters the viewport and trigger the animation. Set elements to invisible after splitting so they're hidden until the scroll trigger fires.
+
+<Tabs items={['Preview', 'Code']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl">
+      <ExampleWrapper>
+        <ScrollTriggeredVanilla />
+      </ExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="Code" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```ts
+import { splitText } from 'fetta';
+import { animate, stagger } from 'motion';
+
+const element = document.querySelector('h1');
+const { words } = splitText(element);
+
+// Hide words initially
+words.forEach(w => w.style.opacity = '0');
+
+// Trigger animation when element enters viewport
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach((entry) => {
+    if (entry.isIntersecting) {
+      animate(words, { opacity: [0, 1], y: [30, 0] }, { delay: stagger(0.03) });
+      observer.disconnect();
+    }
+  });
+}, { threshold: 0.5 });
+
+observer.observe(element);
+```
+  </Tab>
+</Tabs>
+
+## Scroll-Driven
+
+Link animations to scroll progress using Motion's `scroll()` function. The animation plays as the target element moves through the viewport.
+
+<Tabs items={['Preview', 'Code']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl">
+      <ExampleWrapper>
+        <ScrollDrivenVanilla />
+      </ExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="Code" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```ts
+import { splitText } from 'fetta';
+import { animate, scroll } from 'motion';
+
+const target = document.querySelector('.text-container');
+const element = target.querySelector('p');
+const { words } = splitText(element);
+
+const animation = animate(
+  words.map((word, i) => [
+    word,
+    { opacity: [0, 1], y: [20, 0] },
+    { duration: 0.5, at: i * 0.1, ease: 'linear' }
+  ])
+);
+
+scroll(animation, { target, offset: ['start 85%', 'start 20%'] });
+```
+  </Tab>
+</Tabs>
+
 ## With GSAP
 
 Fetta works with any animation library. Here's an example using GSAP.
@@ -225,6 +297,45 @@ gsap.from(words, {
   duration: 0.5,
   ease: "power2.out"
 });
+```
+  </Tab>
+</Tabs>
+
+## CSS-Only Animation
+
+Use `propIndex` to add CSS variables (`--char-index`, `--word-index`, `--line-index`) to each element. Animate entirely with CSS — no JavaScript animation library needed.
+
+<Tabs items={['Preview', 'JS', 'CSS']}>
+  <Tab value="Preview" className="p-0 h-[240px] lg:h-[300px]">
+    <div className="bg-fd-card rounded-xl">
+      <ExampleWrapper>
+        <CSSOnlyVanilla />
+      </ExampleWrapper>
+    </div>
+  </Tab>
+  <Tab value="JS" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```ts
+import { splitText } from 'fetta';
+
+const element = document.querySelector('h1');
+splitText(element, { propIndex: true });
+```
+  </Tab>
+  <Tab value="CSS" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
+```css
+.split-char {
+  opacity: 0;
+  transform: translateY(20px);
+  animation: fade-in 0.4s ease forwards;
+  animation-delay: calc(var(--char-index) * 0.03s);
+}
+
+@keyframes fade-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 ```
   </Tab>
 </Tabs>

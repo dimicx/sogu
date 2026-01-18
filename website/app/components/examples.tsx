@@ -196,6 +196,27 @@ export function MaskedLineReveal() {
   );
 }
 
+export function ResponsiveSplit() {
+  return (
+    <div className="w-full">
+      <SplitText
+        autoSplit
+        onSplit={({ lines }) => {
+          animate(
+            lines,
+            { opacity: [0, 1], y: [16, 0] },
+            { delay: stagger(0.08), duration: 0.4 },
+          );
+        }}
+      >
+        <p className="text-lg w-full text-center">
+          Resize the window to see this text re-split and animate again.
+        </p>
+      </SplitText>
+    </div>
+  );
+}
+
 // Vanilla examples using splitText directly
 
 export function BasicFadeInVanilla() {
@@ -354,7 +375,7 @@ export function ResponsiveSplitVanilla() {
   }, []);
 
   return (
-    <p ref={ref} className="text-lg max-w-sm text-center">
+    <p ref={ref} className="text-lg w-full text-center">
       {RESPONSIVE_TEXT}
     </p>
   );
@@ -379,5 +400,158 @@ export function WithGSAPVanilla() {
     <h2 ref={ref} className="text-3xl font-bold my-0!">
       Animated with GSAP
     </h2>
+  );
+}
+
+const SCROLL_TRIGGERED_TEXT = "Reveals on scroll";
+
+export function ScrollTriggeredVanilla() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !textRef.current) return;
+
+    // Reset text for React StrictMode
+    textRef.current.textContent = SCROLL_TRIGGERED_TEXT;
+
+    const { words } = splitText(textRef.current);
+    words.forEach((w) => (w.style.opacity = "0"));
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            animate(
+              words,
+              { opacity: [0, 1], y: [30, 0] },
+              { delay: stagger(0.03) },
+            );
+            observer.disconnect();
+          }
+        });
+      },
+      { root: containerRef.current, threshold: 0.5 },
+    );
+
+    observer.observe(textRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="h-full w-full overflow-y-auto fd-scroll-container"
+    >
+      <div className="flex flex-col items-center justify-center h-full text-fd-muted-foreground">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="mb-2 animate-bounce"
+        >
+          <path d="M12 5v14" />
+          <path d="m19 12-7 7-7-7" />
+        </svg>
+        <span className="text-sm">Scroll down</span>
+      </div>
+      <div className="flex items-center justify-center h-full">
+        <h2 ref={textRef} className="text-2xl font-bold my-0!">
+          {SCROLL_TRIGGERED_TEXT}
+        </h2>
+      </div>
+    </div>
+  );
+}
+
+const CSS_ONLY_TEXT = "Pure CSS animation";
+
+export function CSSOnlyVanilla() {
+  const ref = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.textContent = CSS_ONLY_TEXT;
+    splitText(ref.current, { propIndex: true });
+  }, []);
+
+  return (
+    <p ref={ref} className="text-3xl font-bold my-0! css-only-example">
+      {CSS_ONLY_TEXT}
+    </p>
+  );
+}
+
+const SCROLL_DRIVEN_TEXT =
+  "Each word reveals as you scroll through this container";
+
+export function ScrollDrivenVanilla() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const targetRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !targetRef.current || !textRef.current) return;
+
+    // Reset text for React StrictMode
+    textRef.current.textContent = SCROLL_DRIVEN_TEXT;
+
+    const { words } = splitText(textRef.current);
+
+    const animation = animate(
+      words.map((word, i) => [
+        word,
+        { opacity: [0, 1], y: [20, 0] },
+        { duration: 0.5, at: i * 0.1, ease: "linear" as const },
+      ]),
+    );
+
+    const cleanup = scroll(animation, {
+      container: containerRef.current,
+      target: targetRef.current,
+      offset: ["start 85%", "start 20%"],
+    });
+
+    return cleanup;
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="h-full w-full overflow-y-auto fd-scroll-container relative"
+    >
+      <div className="flex flex-col items-center justify-center h-full text-fd-muted-foreground">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="mb-2 animate-bounce"
+        >
+          <path d="M12 5v14" />
+          <path d="m19 12-7 7-7-7" />
+        </svg>
+        <span className="text-sm">Scroll to animate</span>
+      </div>
+      <div className="flex items-center justify-center min-h-full">
+        <div ref={targetRef}>
+          <p ref={textRef} className="text-2xl font-bold text-center max-w-xs">
+            {SCROLL_DRIVEN_TEXT}
+          </p>
+        </div>
+      </div>
+      <div className="h-full" />
+    </div>
   );
 }
