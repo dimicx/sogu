@@ -1,11 +1,12 @@
 import { source } from "@/app/source";
+import { Analytics } from "@vercel/analytics/next";
+import { GithubInfo } from "fumadocs-ui/components/github-info";
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
 import { EB_Garamond, IBM_Plex_Mono, Inter, Quantico } from "next/font/google";
 import { FettaLogo } from "./components/icons/fetta-logo";
 import { SidebarSeparator } from "./components/sidebar-separator";
-import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const inter = Inter({
@@ -66,12 +67,23 @@ export default function RootLayout({
               ),
               url: "/",
             }}
-            githubUrl="https://github.com/dimicx/fetta"
             sidebar={{
               components: {
                 Separator: SidebarSeparator,
               },
             }}
+            links={[
+              {
+                type: "custom",
+                children: (
+                  <GithubInfo
+                    owner="dimicx"
+                    repo="fetta"
+                    className="lg:-mx-2"
+                  />
+                ),
+              },
+            ]}
           >
             {children}
           </DocsLayout>
