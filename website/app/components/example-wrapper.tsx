@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, type ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { motion } from "motion/react";
 
 function ReplayIcon() {
@@ -73,11 +73,16 @@ function DragHandle() {
 
 export function ResizableExampleWrapper({ children }: { children: ReactNode }) {
   const [key, setKey] = useState(0);
-  const [width, setWidth] = useState(() =>
-    typeof window !== "undefined" && window.innerWidth < 768 ? 75 : 50,
-  );
+  const [width, setWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Set correct initial width after hydration on mobile
+  useEffect(() => {
+    if (window.innerWidth < 768) {
+      setWidth(75);
+    }
+  }, []);
 
   // Larger minimum width on mobile to prevent text from shrinking too much
   const getMinWidth = () => (window.innerWidth < 768 ? 40 : 30);
