@@ -21,7 +21,7 @@ Fetta preserves original character positions, so your text looks exactly the sam
 
 ## Features
 
-- **Kerning Compensation** — Maintains original character spacing after splitting
+- **Kerning Compensation** — Maintains original character spacing when splitting by chars
 - **Nested Elements** — Preserves `<a>`, `<em>`, `<strong>` and other inline elements with all attributes
 - **Auto-Revert** — Restore original HTML after animations
 - **Line Detection** — Automatically groups words into lines
@@ -31,6 +31,10 @@ Fetta preserves original character positions, so your text looks exactly the sam
 - **Accessible** — Adds `aria-label` with original text for screen readers
 - **TypeScript** — Full type definitions included
 - **Framework Agnostic** — Works with vanilla JS, React, and any animation library
+
+## Browser Notes
+
+**Safari**: Kerning compensation is not available in Safari due to its Range API returning integer values instead of sub-pixel precision. When using `revertOnComplete` with char splitting, font kerning is automatically disabled to prevent visual shift on revert.
 
 ## Quick Example
 

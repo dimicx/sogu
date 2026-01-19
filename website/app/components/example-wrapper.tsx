@@ -73,8 +73,14 @@ function DragHandle() {
 
 export function ResizableExampleWrapper({ children }: { children: ReactNode }) {
   const [key, setKey] = useState(0);
-  const [width, setWidth] = useState(50);
+  const [width, setWidth] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth < 768 ? 75 : 50,
+  );
+  const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Larger minimum width on mobile to prevent text from shrinking too much
+  const getMinWidth = () => (window.innerWidth < 768 ? 40 : 30);
 
   return (
     <div className="relative w-full h-[240px] lg:h-[300px]">
@@ -98,7 +104,7 @@ export function ResizableExampleWrapper({ children }: { children: ReactNode }) {
         >
           <div
             key={key}
-            className="w-full h-full flex items-center justify-center px-3"
+            className={`w-full h-full flex items-center justify-center px-4 ${isDragging ? "select-none" : ""}`}
           >
             {children}
           </div>
@@ -107,11 +113,15 @@ export function ResizableExampleWrapper({ children }: { children: ReactNode }) {
             dragMomentum={false}
             dragElastic={0}
             dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+            onDragStart={() => setIsDragging(true)}
+            onDragEnd={() => setIsDragging(false)}
             onDrag={(_, info) => {
               if (!containerRef.current) return;
               const containerWidth = containerRef.current.offsetWidth;
               const deltaPercent = (info.delta.x / containerWidth) * 100;
-              setWidth((w) => Math.max(30, Math.min(100, w + deltaPercent)));
+              setWidth((w) =>
+                Math.max(getMinWidth(), Math.min(100, w + deltaPercent)),
+              );
             }}
             className="absolute right-0 top-1/2 h-7 translate-x-1/2 -translate-y-1/2 z-10 cursor-ew-resize py-1 rounded bg-fd-secondary text-fd-muted-foreground hover:text-fd-accent-foreground hover:bg-fd-accent transition-colors"
             aria-label="Drag to resize"

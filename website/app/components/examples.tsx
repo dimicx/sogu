@@ -23,6 +23,7 @@ export function BasicFadeIn() {
   return (
     <div className="px-4">
       <SplitText
+        options={{ type: "words" }}
         onSplit={({ words }) => {
           animate(
             words,
@@ -43,6 +44,7 @@ export function CharacterReveal() {
   return (
     <div className="px-4">
       <SplitText
+        options={{ type: "chars" }}
         onSplit={({ chars }) => {
           animate(
             chars,
@@ -103,13 +105,14 @@ export function ScrollTriggered() {
       </div>
       <div className="flex items-center justify-center h-full">
         <SplitText
+          options={{ type: "words" }}
           onSplit={({ words }) => {
             words.forEach((w) => {
               w.style.opacity = "0";
               w.style.transform = "translateY(30px)";
             });
           }}
-          inView={{ amount: 0.5 }}
+          inView={{ amount: 1 }}
           onInView={({ words }) =>
             animate(
               words,
@@ -161,6 +164,7 @@ export function ScrollDriven() {
       <div className="flex items-center justify-center min-h-full">
         <div ref={targetRef}>
           <SplitText
+            options={{ type: "words" }}
             onSplit={({ words }) => {
               const container = containerRef.current;
               const target = targetRef.current;
@@ -180,7 +184,6 @@ export function ScrollDriven() {
                 offset: ["start 85%", "start 20%"],
               });
             }}
-            options={{ type: "words" }}
           >
             <p className="text-2xl font-medium text-center max-w-xs">
               Each word reveals as you scroll through this container
@@ -200,6 +203,7 @@ export function AutoRevert() {
     <div className="px-4">
       <StatusIndicator status={status} />
       <SplitText
+        options={{ type: "chars" }}
         onSplit={({ chars }) => {
           const animation = animate(
             chars,
@@ -244,6 +248,7 @@ export function EmojiSupport() {
   return (
     <div className="px-4">
       <SplitText
+        options={{ type: "chars" }}
         onSplit={({ chars }) => {
           animate(
             chars,
@@ -264,6 +269,7 @@ export function NestedElements() {
   return (
     <div className="px-4">
       <SplitText
+        options={{ type: "chars" }}
         onSplit={({ chars }) => {
           animate(
             chars,
@@ -342,7 +348,7 @@ export function CharacterRevealVanilla() {
     if (!ref.current) return;
     // Reset to original text before splitting (handles remounting)
     ref.current.textContent = CHARACTER_REVEAL_TEXT;
-    const { chars } = splitText(ref.current);
+    const { chars } = splitText(ref.current, { type: "chars" });
     animate(
       chars,
       { opacity: [0, 1], scale: [0.5, 1] },
@@ -391,7 +397,7 @@ export function NestedElementsVanilla() {
     if (!ref.current) return;
     // Reset to original HTML before splitting (handles React StrictMode double-execution)
     ref.current.innerHTML = NESTED_ELEMENTS_HTML;
-    const { chars } = splitText(ref.current);
+    const { chars } = splitText(ref.current, { type: "chars" });
     animate(
       chars,
       { opacity: [0, 1], y: [10, 0] },
@@ -454,9 +460,10 @@ export function AutoRevertVanilla() {
     queueMicrotask(() => setStatus("animating"));
 
     splitText(ref.current, {
-      onSplit: ({ chars }) => {
+      type: "words",
+      onSplit: ({ words }) => {
         const animation = animate(
-          chars,
+          words,
           { opacity: [0, 1], y: [10, 0] },
           { delay: stagger(0.02), duration: 0.3 },
         );
@@ -527,7 +534,7 @@ export function WithGSAPVanilla() {
     if (!ref.current) return;
     // Reset to original text before splitting (handles React StrictMode double-execution)
     ref.current.textContent = GSAP_TEXT;
-    const { words } = splitText(ref.current);
+    const { words } = splitText(ref.current, { type: "words" });
     gsap.from(words, {
       opacity: 0,
       y: 30,
@@ -556,7 +563,7 @@ export function ScrollTriggeredVanilla() {
     // Reset text for React StrictMode
     textRef.current.textContent = SCROLL_TRIGGERED_TEXT;
 
-    const { words } = splitText(textRef.current);
+    const { words } = splitText(textRef.current, { type: "words" });
 
     // Set initial hidden state
     words.forEach((w) => {
@@ -580,7 +587,7 @@ export function ScrollTriggeredVanilla() {
           });
         };
       },
-      { root: containerRef.current, amount: 0.5 },
+      { root: containerRef.current, amount: 1 },
     );
 
     return cleanup;
@@ -653,7 +660,7 @@ export function ScrollDrivenVanilla() {
     // Reset text for React StrictMode
     textRef.current.textContent = SCROLL_DRIVEN_TEXT;
 
-    const { words } = splitText(textRef.current);
+    const { words } = splitText(textRef.current, { type: "words" });
 
     const animation = animate(
       words.map((word, i) => [

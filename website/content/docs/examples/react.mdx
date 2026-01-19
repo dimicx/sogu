@@ -33,6 +33,7 @@ The `onSplit` callback fires after the text is split, giving you access to the s
       { delay: stagger(0.05), duration: 0.5 }
     );
   }}
+  options={{ type: "words" }}
 >
   <p>Fade in each word</p>
 </SplitText>
@@ -62,6 +63,7 @@ Access `chars` instead of `words` to animate each character individually. Use sh
       { delay: stagger(0.02), duration: 0.3 }
     );
   }}
+  options={{ type: "chars" }}
 >
   <p>Character by character</p>
 </SplitText>
@@ -91,6 +93,7 @@ Fetta correctly handles compound emojis like family groups, flags, and skin tone
       { delay: stagger(0.05), duration: 0.3 }
     );
   }}
+  options={{ type: "chars" }}
 >
   <p>Family: 👨‍👩‍👧‍👦 Flag: 🇯🇵 Skin: 👋🏽</p>
 </SplitText>
@@ -120,9 +123,10 @@ Fetta preserves inline HTML elements like `<a>`, `<em>`, and `<strong>` when spl
       { delay: stagger(0.02), duration: 0.3 }
     );
   }}
+  options={{ type: "chars" }}
 >
   <p>
-    Click <a href="#">this link</a> or see <em>emphasized</em> and <strong>bold</strong> text
+    Click <a href="#"><em>this link</em></a> or see <em>emphasized</em> and <strong>bold</strong> text
   </p>
 </SplitText>
 ```
@@ -151,6 +155,7 @@ Lines are detected based on actual rendered positions, so this works with any te
       { delay: stagger(0.1), duration: 0.6 }
     );
   }}
+  options={{ type: "lines" }}
 >
   <p>
     This paragraph animates line by line.
@@ -216,6 +221,7 @@ If you want to re-trigger animations on resize, use the `onResize` callback.
       { delay: stagger(0.08), duration: 0.4 }
     );
   }}
+  options={{ type: "lines" }}
 >
   <p>This text reflows naturally at any width, with lines recalculated on resize.</p>
 </SplitText>
@@ -241,6 +247,7 @@ Set `revertOnComplete` to automatically restore the original HTML when the anima
   onSplit={({ chars }) =>
     animate(chars, { opacity: [0, 1], y: [10, 0] }, { delay: stagger(0.02), duration: 0.3 })
   }
+  options={{ type: "chars" }}
   revertOnComplete
 >
   <p>Auto-revert after animation</p>
@@ -270,7 +277,8 @@ Use `inView` to detect when the element enters the viewport, and `onInView` to t
       w.style.transform = 'translateY(30px)';
     });
   }}
-  inView={{ amount: 0.5 }}
+  options={{ type: "words" }}
+  inView={{ amount: 1 }}
   onInView={({ words }) =>
     animate(words, { opacity: [0, 1], y: [30, 0] }, { delay: stagger(0.03) })
   }

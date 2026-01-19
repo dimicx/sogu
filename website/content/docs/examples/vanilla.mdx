@@ -29,7 +29,7 @@ import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
 const element = document.querySelector('p');
-const { words } = splitText(element);
+const { words } = splitText(element, { type: 'words' });
 
 animate(
   words,
@@ -58,7 +58,7 @@ import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
 const element = document.querySelector('p');
-const { chars } = splitText(element);
+const { chars } = splitText(element, { type: 'chars' });
 
 animate(
   chars,
@@ -87,7 +87,7 @@ import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
 const element = document.querySelector('p');
-const { lines } = splitText(element);
+const { lines } = splitText(element, { type: 'lines' });
 
 animate(
   lines,
@@ -116,9 +116,9 @@ import { splitText } from 'fetta';
 import { animate, stagger } from 'motion';
 
 const element = document.querySelector('p');
-// HTML: Click <a href="#">this link</a> or see <em>emphasized</em> text
+// HTML: Click <a href="#"><em>this link</em></a> or see <em>emphasized</em> and <strong>bold</strong> text
 
-const { chars } = splitText(element);
+const { chars } = splitText(element, { type: 'chars' });
 
 animate(
   chars,
@@ -183,6 +183,7 @@ import { animate, stagger } from 'motion';
 const element = document.querySelector('p');
 
 splitText(element, {
+  type: 'chars',
   onSplit: ({ chars }) =>
     animate(chars, { opacity: [0, 1], y: [10, 0] }, { delay: stagger(0.02), duration: 0.3 }),
   revertOnComplete: true
@@ -213,6 +214,7 @@ import { animate, stagger } from 'motion';
 const element = document.querySelector('p');
 
 const result = splitText(element, {
+  type: 'lines',
   autoSplit: true,
   onResize: ({ lines }) => {
     animate(
@@ -247,7 +249,7 @@ import { splitText } from 'fetta';
 import { animate, stagger, inView } from 'motion';
 
 const element = document.querySelector('p');
-const { words } = splitText(element);
+const { words } = splitText(element, { type: 'words' });
 
 // Hide words initially
 words.forEach(w => {
@@ -265,7 +267,7 @@ inView(element, () => {
       w.style.transform = 'translateY(30px)';
     });
   };
-}, { amount: 0.5 });
+}, { amount: 1 });
 ```
   </Tab>
 </Tabs>
@@ -289,7 +291,7 @@ import { animate, scroll } from 'motion';
 
 const target = document.querySelector('.text-container');
 const element = target.querySelector('p');
-const { words } = splitText(element);
+const { words } = splitText(element, { type: 'words' });
 
 const animation = animate(
   words.map((word, i) => [
@@ -322,7 +324,7 @@ import { splitText } from 'fetta';
 import gsap from 'gsap';
 
 const element = document.querySelector('p');
-const { words } = splitText(element);
+const { words } = splitText(element, { type: 'words' });
 
 gsap.from(words, {
   opacity: 0,
@@ -352,7 +354,7 @@ Use `propIndex` to add CSS variables (`--char-index`, `--word-index`, `--line-in
 import { splitText } from 'fetta';
 
 const element = document.querySelector('p');
-splitText(element, { propIndex: true });
+splitText(element, { type: 'chars', propIndex: true });
 ```
   </Tab>
   <Tab value="CSS" className="[&_figure]:h-[240px]! [&_figure]:lg:h-[300px]! [&_figure_[role=region]]:max-h-[240px]! [&_figure_[role=region]]:lg:max-h-[300px]!">
