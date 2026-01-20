@@ -31,8 +31,8 @@ export function BasicFadeIn() {
         onSplit={({ words }) => {
           animate(
             words,
-            { opacity: [0, 1], filter: ["blur(12px)", "blur(0px)"], y: [24, 0] },
-            { delay: stagger(0.04), duration: 0.7, ease: easeOutExpo },
+            { opacity: [0, 1], filter: ["blur(8px)", "blur(0px)"], y: [20, 0] },
+            { delay: stagger(0.04), duration: 0.6, ease: easeOutQuart },
           );
         }}
       >
@@ -57,7 +57,7 @@ export function CharacterReveal() {
               filter: ["blur(10px)", "blur(0px)"],
               y: [16, 0],
             },
-            { delay: stagger(0.025), duration: 0.5, ease: easeOutQuart },
+            { delay: stagger(0.03), duration: 0.65, ease: easeOutQuart },
           );
         }}
       >
@@ -81,7 +81,7 @@ export function LineByLine() {
               filter: ["blur(8px)", "blur(0px)"],
               y: [20, 0],
             },
-            { delay: stagger(0.12), duration: 0.7, ease: easeOutExpo },
+            { delay: stagger(0.1), duration: 0.6, ease: easeOutQuart },
           );
         }}
       >
@@ -233,7 +233,7 @@ export function AutoRevert() {
               filter: ["blur(8px)", "blur(0px)"],
               y: [12, 0],
             },
-            { delay: stagger(0.018), duration: 0.4, ease: easeOutQuart },
+            { delay: stagger(0.025), duration: 0.55, ease: easeOutQuart },
           );
           animation.finished.then(() => setStatus("reverted"));
           return animation;
@@ -282,7 +282,7 @@ export function EmojiSupport() {
               scale: [0.8, 1],
               y: [10, 0],
             },
-            { delay: stagger(0.035), duration: 0.5, ease: easeOutQuart },
+            { delay: stagger(0.045), duration: 0.6, ease: easeOutQuart },
           );
         }}
       >
@@ -307,7 +307,7 @@ export function NestedElements() {
               filter: ["blur(6px)", "blur(0px)"],
               y: [8, 0],
             },
-            { delay: stagger(0.02), duration: 0.4, ease: easeOutQuart },
+            { delay: stagger(0.025), duration: 0.55, ease: easeOutQuart },
           );
         }}
       >
@@ -361,8 +361,8 @@ export function BasicFadeInVanilla() {
     const { words } = splitText(ref.current);
     animate(
       words,
-      { opacity: [0, 1], filter: ["blur(12px)", "blur(0px)"], y: [24, 0] },
-      { delay: stagger(0.04), duration: 0.7, ease: easeOutExpo },
+      { opacity: [0, 1], filter: ["blur(8px)", "blur(0px)"], y: [20, 0] },
+      { delay: stagger(0.04), duration: 0.6, ease: easeOutQuart },
     );
   }, []);
 
@@ -390,7 +390,7 @@ export function CharacterRevealVanilla() {
         filter: ["blur(10px)", "blur(0px)"],
         y: [16, 0],
       },
-      { delay: stagger(0.025), duration: 0.5, ease: easeOutQuart },
+      { delay: stagger(0.03), duration: 0.65, ease: easeOutQuart },
     );
   }, []);
 
@@ -419,7 +419,7 @@ export function LineByLineVanilla() {
         filter: ["blur(8px)", "blur(0px)"],
         y: [20, 0],
       },
-      { delay: stagger(0.12), duration: 0.7, ease: easeOutExpo },
+      { delay: stagger(0.1), duration: 0.6, ease: easeOutQuart },
     );
   }, []);
 
@@ -447,7 +447,7 @@ export function NestedElementsVanilla() {
         filter: ["blur(6px)", "blur(0px)"],
         y: [8, 0],
       },
-      { delay: stagger(0.02), duration: 0.4, ease: easeOutQuart },
+      { delay: stagger(0.025), duration: 0.55, ease: easeOutQuart },
     );
   }, []);
 
@@ -506,16 +506,16 @@ export function AutoRevertVanilla() {
     queueMicrotask(() => setStatus("animating"));
 
     splitText(ref.current, {
-      type: "words",
-      onSplit: ({ words }) => {
+      type: "chars",
+      onSplit: ({ chars }) => {
         const animation = animate(
-          words,
+          chars,
           {
             opacity: [0, 1],
             filter: ["blur(8px)", "blur(0px)"],
             y: [12, 0],
           },
-          { delay: stagger(0.03), duration: 0.5, ease: easeOutQuart },
+          { delay: stagger(0.025), duration: 0.55, ease: easeOutQuart },
         );
         animation.finished.then(() => setStatus("reverted"));
         return animation;
