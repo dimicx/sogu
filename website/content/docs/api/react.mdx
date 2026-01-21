@@ -138,6 +138,12 @@ Fetta preserves inline elements like `<a>`, `<em>`, `<strong>` when splitting. A
 </SplitText>
 ```
 
+## Accessibility
+
+Fetta automatically handles accessibility. For plain text, an `aria-label` is added. For nested elements like links, a screen-reader-only copy preserves the semantic structure while the visual content is hidden from assistive technology.
+
+See the [core API docs](/api/core#accessibility) for details.
+
 ## With Ref (Scroll-Driven)
 
 Use a ref to link scroll-driven animations with Motion's `scroll()` function.

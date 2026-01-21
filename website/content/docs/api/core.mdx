@@ -124,3 +124,46 @@ splitText(element, { propIndex: true });
   animation-delay: calc(var(--char-index) * 0.05s);
 }
 ```
+
+## Accessibility
+
+Fetta automatically handles accessibility to ensure split text remains readable by screen readers.
+
+### Simple Text
+
+For plain text without nested elements, Fetta adds an `aria-label` with the original text content:
+
+```html
+<!-- Before -->
+<p>Hello World</p>
+
+<!-- After splitting -->
+<p aria-label="Hello World">
+  <span class="split-word">Hello</span>
+  <span class="split-word">World</span>
+</p>
+```
+
+### Nested Elements
+
+When text contains inline elements like links or emphasis, Fetta uses a two-tier approach to preserve semantic structure:
+
+1. Visual content is wrapped with `aria-hidden="true"`
+2. A screen-reader-only copy preserves the original HTML
+
+```html
+<!-- Before -->
+<p>Click <a href="/signup">here</a> to start</p>
+
+<!-- After splitting -->
+<p>
+  <span aria-hidden="true" data-fetta-visual="true">
+    <!-- Split visual content -->
+  </span>
+  <span class="fetta-sr-only" data-fetta-sr-copy="true">
+    Click <a href="/signup">here</a> to start
+  </span>
+</p>
+```
+
+This ensures links and other interactive elements remain accessible to assistive technology, while the visual split content is used for animation.

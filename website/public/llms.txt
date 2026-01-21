@@ -77,7 +77,7 @@ import { SplitText } from "fetta/react";
 - **Dash Handling**: Text wraps naturally after em-dashes (—) and en-dashes (–)
 - **AutoSplit**: ResizeObserver re-splits text when container resizes (debounced 200ms)
 - **InView**: Built-in IntersectionObserver for scroll-triggered animations
-- **Accessibility**: Automatically adds aria-label with original text
+- **Accessibility**: Automatic screen reader support, even when splitting text with nested links or emphasis
 
 ## Animation Example
 
