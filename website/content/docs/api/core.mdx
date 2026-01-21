@@ -131,7 +131,7 @@ Fetta automatically handles accessibility to ensure split text remains readable 
 
 ### Simple Text
 
-For plain text without nested elements, Fetta adds an `aria-label` with the original text content:
+For plain text without nested elements, Fetta adds `aria-hidden="true"` to each split span and an `aria-label` on the parent:
 
 ```html
 <!-- Before -->
@@ -139,8 +139,8 @@ For plain text without nested elements, Fetta adds an `aria-label` with the orig
 
 <!-- After splitting -->
 <p aria-label="Hello World">
-  <span class="split-word">Hello</span>
-  <span class="split-word">World</span>
+  <span class="split-word" aria-hidden="true">Hello</span>
+  <span class="split-word" aria-hidden="true">World</span>
 </p>
 ```
 

@@ -111,7 +111,7 @@ website/
 The implementation **disables font ligatures** (`font-variant-ligatures: none`) because ligatures cannot span multiple span elements. This is set permanently and maintained even after revert.
 
 ### Accessibility
-Split text elements automatically receive `aria-label` with the original text content for screen readers.
+For simple text, each split span receives `aria-hidden="true"` and the parent gets an `aria-label` with the original text. For nested elements (links, emphasis), visual content is wrapped in an `aria-hidden` container and a screen-reader-only copy preserves the semantic structure.
 
 ### Line Detection
 Lines are detected by Y-position clustering after kerning compensation is applied. Words with Y-positions within 5px tolerance are grouped into the same line.
