@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { splitText } from "fetta";
 import gsap from "gsap";
 import { SplitText as GSAPSplitText } from "gsap/SplitText";
@@ -98,6 +97,7 @@ interface FettaTextRowProps {
   showOutlines: boolean;
   onCompensationData: (data: CompensationData) => void;
   onTooltip: (state: TooltipState | null) => void;
+  containerRef: RefObject<HTMLDivElement | null>;
 }
 
 function FettaTextRow({
@@ -105,6 +105,7 @@ function FettaTextRow({
   showOutlines,
   onCompensationData,
   onTooltip,
+  containerRef,
 }: FettaTextRowProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const onCompensationDataRef = useRef(onCompensationData);
@@ -180,11 +181,16 @@ function FettaTextRow({
     activeCharRef.current = char;
     char.setAttribute("data-active", "true");
 
-    const rect = char.getBoundingClientRect();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const charRect = char.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+
     onTooltip({
       margin: char.dataset.margin!,
-      x: rect.left + rect.width / 2,
-      y: rect.top,
+      x: charRect.left - containerRect.left + charRect.width / 2,
+      y: charRect.top - containerRect.top,
     });
   };
 
@@ -269,7 +275,7 @@ function FettaTextRow({
   };
 
   return (
-    <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
+    <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3 mt-2">
       <span
         ref={ref}
         className={cn(
@@ -293,9 +299,9 @@ function FettaTextRow({
 }
 
 function CharTooltip({ state }: { state: TooltipState }) {
-  return createPortal(
+  return (
     <div
-      className="fixed z-50 px-1.5 py-1 text-xs rounded-xs bg-fd-foreground text-fd-background pointer-events-none animate-in fade-in-0 zoom-in-95 duration-100"
+      className="absolute z-50 px-1.5 py-1 text-xs rounded-xs bg-fd-foreground text-fd-background pointer-events-none"
       style={{
         left: state.x,
         top: state.y,
@@ -304,8 +310,7 @@ function CharTooltip({ state }: { state: TooltipState }) {
     >
       {state.margin}
       <div className="absolute left-1/2 -translate-x-1/2 bottom-0 translate-y-[calc(50%-2px)] size-2 rotate-45 rounded-[1px] bg-fd-foreground" />
-    </div>,
-    document.body,
+    </div>
   );
 }
 
@@ -317,6 +322,7 @@ export function KerningComparison() {
     indexes: [],
   });
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const textContainerRef = useRef<HTMLDivElement>(null);
 
   // Outline styles: only applied to highlighted chars
   const outlineStyles =
@@ -324,8 +330,11 @@ export function KerningComparison() {
 
   return (
     <figure className="my-8 not-prose font-sans">
-      <div className="bg-fd-card rounded-xl relative border shadow-sm overflow-hidden">
-        <div className={cn("p-4 space-y-2", outlineStyles)}>
+      <div className="bg-fd-card rounded-xl relative border shadow-sm">
+        <div
+          ref={textContainerRef}
+          className={cn("p-4 relative", outlineStyles)}
+        >
           <GSAPTextRow
             isSplit={isSplit}
             showOutlines={showOutlines}
@@ -336,10 +345,10 @@ export function KerningComparison() {
             showOutlines={showOutlines}
             onCompensationData={setCompensationData}
             onTooltip={setTooltip}
+            containerRef={textContainerRef}
           />
+          {tooltip && <CharTooltip state={tooltip} />}
         </div>
-
-        {tooltip && <CharTooltip state={tooltip} />}
 
         <div className="flex items-center justify-between px-4 py-3 border-t border-fd-border">
           <div className="flex items-center">
