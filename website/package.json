@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vercel/analytics": "^1.6.1",
+    "clsx": "^2.1.1",
     "fetta": "workspace:*",
     "fumadocs-core": "^16.0.3",
     "fumadocs-ui": "^16.0.3",
@@ -17,7 +18,8 @@
     "motion": "^12.26.1",
     "next": "^16.0.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
