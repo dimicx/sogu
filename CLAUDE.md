@@ -117,7 +117,7 @@ For simple text, each split span receives `aria-hidden="true"` and the parent ge
 Lines are detected by Y-position clustering after kerning compensation is applied. Words with Y-positions within 5px tolerance are grouped into the same line.
 
 ### Safari Browser Handling
-Kerning compensation is disabled in Safari because its Range API returns integer values instead of sub-pixel precision. The `isSafari` constant in `splitText.ts` detects Safari/WebKit browsers. When using `revertOnComplete` with character splitting in Safari, `font-kerning: none` is applied to prevent visual shift on revert.
+Kerning compensation is disabled in Safari because its text measurement doesn't accurately match the visual rendering. The `isSafari` constant in `splitText.ts` detects Safari/WebKit browsers. When using `revertOnComplete` with character splitting in Safari, `font-kerning: none` is applied to prevent visual shift on revert.
 
 ### State Management in React Component
 The React wrapper uses:

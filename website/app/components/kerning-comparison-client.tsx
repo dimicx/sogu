@@ -371,8 +371,7 @@ export function KerningComparisonClient({
             Outlined characters
           </span>{" "}
           are kerning-compensated in Fetta. Interactive demo unavailable in
-          Safari/WebKit — its Range API returns integers instead of sub-pixel
-          values.
+          Safari/WebKit due to measurement limitations.
         </figcaption>
       </figure>
     );
@@ -411,9 +410,9 @@ export function KerningComparisonClient({
               className={cn(
                 "w-20 h-9.5 text-[15px] rounded-l-lg border font-medium cursor-pointer transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2",
                 {
-                  "bg-fd-accent text-fd-accent-foreground border-fd-foreground/20":
+                  "bg-fd-secondary text-fd-accent-foreground border-fd-foreground/20":
                     isSplit,
-                  "border-fd-border bg-fd-secondary text-fd-secondary-foreground not-disabled:hover:bg-fd-accent":
+                  "border-fd-border bg-transparent text-fd-secondary-foreground not-disabled:hover:bg-fd-secondary":
                     !isSplit,
                 },
               )}
@@ -432,9 +431,9 @@ export function KerningComparisonClient({
               className={cn(
                 "h-9.5 text-[15px] px-4 rounded-r-lg border border-l-0 font-medium cursor-pointer transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2",
                 {
-                  "bg-fd-accent text-fd-accent-foreground border-fd-foreground/20":
+                  "bg-fd-secondary text-fd-accent-foreground border-fd-foreground/20":
                     showOutlines,
-                  "border-fd-border bg-fd-secondary text-fd-secondary-foreground not-disabled:hover:bg-fd-accent":
+                  "border-fd-border bg-transparent text-fd-secondary-foreground not-disabled:hover:bg-fd-secondary":
                     !showOutlines,
                 },
               )}
@@ -444,11 +443,8 @@ export function KerningComparisonClient({
           </div>
 
           {isSplit && (
-            <span className="text-xs text-fd-muted-foreground">
-              <span className="text-amber-600 dark:text-amber-500 font-medium">
-                {compensationData.count}
-              </span>{" "}
-              chars compensated
+            <span className="text-xs text-fd-foreground">
+              {compensationData.count} chars compensated
             </span>
           )}
         </div>

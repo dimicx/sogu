@@ -40,7 +40,7 @@ Fetta measures character positions before splitting, then applies margin adjustm
 
 ## Browser Notes
 
-**Safari**: Kerning compensation is not available in Safari due to its Range API returning integer values instead of sub-pixel precision. When using `revertOnComplete` with char splitting, font kerning is automatically disabled to prevent visual shift on revert.
+**Safari**: Kerning compensation is not available in Safari because its text measurement doesn't accurately match the visual rendering. When using `revertOnComplete` with char splitting, font kerning is automatically disabled to prevent visual shift on revert.
 
 ## Quick Example
 
