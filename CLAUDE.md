@@ -58,12 +58,13 @@ packages/fetta/
 ### Key Architectural Features
 
 **Kerning Compensation System**
-The core innovation is measuring character positions BEFORE splitting, then applying margin adjustments AFTER splitting to maintain original typography:
+The core innovation is measuring kerning between character pairs and applying margin adjustments to maintain original typography:
 
-1. Measure original character positions using Range API
+1. For each word, measure kerning using DOM-based measurement (pair width - char1 width - char2 width)
 2. Split text into span elements
-3. Calculate gap differences between original and split positions
-4. Apply `marginLeft` adjustments to each character
+3. Apply `marginLeft` adjustments to compensate for lost kerning
+
+The DOM-based measurement creates a hidden span that inherits all styles including `-webkit-font-smoothing`, which is critical for accurate Safari measurements. A 0.01px threshold captures subpixel adjustments.
 
 **Dash Handling**
 Text can wrap naturally after em-dashes (—) and en-dashes (–):
