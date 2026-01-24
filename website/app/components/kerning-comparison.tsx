@@ -6,5 +6,5 @@ export async function KerningComparison() {
   const userAgent = headersList.get("user-agent") || "";
   const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
 
-  return <KerningComparisonClient isSafari={isSafari} />;
+  return <KerningComparisonClient isSafari={false} />;
 }
