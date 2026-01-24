@@ -53,7 +53,7 @@ function TextRow({ library, isSplit }: TextRowProps) {
     <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
       <span
         ref={ref}
-        className="text-[28px] font-medium tracking-tight leading-tight"
+        className="text-[28px] lg:text-[32px] font-medium tracking-tight leading-tight"
       >
         {COMPARISON_TEXT}
       </span>
@@ -93,10 +93,10 @@ export function KerningComparison() {
             }}
             aria-pressed={isSplit}
             aria-label={isSplit ? "Revert" : "Split"}
-            className={`w-20 h-9.5 text-[15px] rounded-l-md border font-medium cursor-pointer transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 ${
+            className={`w-20 h-9.5 text-[15px] rounded-l-lg border font-medium cursor-pointer transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 ${
               isSplit
                 ? "bg-fd-accent text-fd-accent-foreground border-fd-foreground/20"
-                : "border-fd-border bg-fd-secondary text-fd-secondary-foreground"
+                : "border-fd-border bg-fd-secondary text-fd-secondary-foreground not-disabled:hover:bg-fd-accent"
             }`}
           >
             {isSplit ? "Revert" : "Split"}
@@ -110,7 +110,7 @@ export function KerningComparison() {
                 ? "Hide character outlines"
                 : "Show character outlines"
             }
-            className={`h-9.5 text-[15px] px-4 rounded-r-md border border-l-0 font-medium cursor-pointer transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 ${
+            className={`h-9.5 text-[15px] px-4 rounded-r-lg border border-l-0 font-medium cursor-pointer transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fd-ring focus-visible:ring-offset-2 ${
               showOutlines
                 ? "bg-fd-accent text-fd-accent-foreground border-fd-foreground/20"
                 : "border-fd-border bg-fd-secondary text-fd-secondary-foreground not-disabled:hover:bg-fd-accent"
