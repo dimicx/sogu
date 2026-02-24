@@ -1,0 +1,445 @@
+import { splitText, normalizeToPromise } from "../core/splitText";
+import type { AnimationCallbackReturn } from "../core/splitText";
+import {
+  reapplyInitialStyles,
+  reapplyInitialClasses,
+} from "../internal/initialStyles";
+import type { InitialStyles, InitialClasses } from "../internal/initialStyles";
+import { waitForFontsReady } from "../internal/waitForFontsReady";
+import { createViewportObserver } from "../internal/viewportObserver";
+import {
+  createElement,
+  forwardRef,
+  isValidElement,
+  ReactElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+
+export interface SplitTextOptions {
+  type?:
+    | "chars"
+    | "words"
+    | "lines"
+    | "chars,words"
+    | "words,lines"
+    | "chars,lines"
+    | "chars,words,lines";
+  charClass?: string;
+  wordClass?: string;
+  lineClass?: string;
+  /** Apply overflow mask wrapper to elements for reveal animations */
+  mask?: "lines" | "words" | "chars";
+  /** Debounce delay for autoSplit/full-resplit width updates in milliseconds (`0` disables debounce). */
+  resplitDebounceMs?: number;
+  propIndex?: boolean;
+  /** Skip kerning compensation (no margin adjustments applied).
+   * Kerning is naturally lost when splitting into inline-block spans.
+   * Use this if you prefer no compensation over imperfect Safari compensation. */
+  disableKerning?: boolean;
+}
+
+/** Matches Motion's viewport prop */
+interface ViewportOptions {
+  /** Only trigger once. Default: false */
+  once?: boolean;
+  /** How much of the element must be visible. Motion supports "some" | "all" | number. Default: 0 */
+  amount?: number | "some" | "all";
+  /** How much visibility is required to consider the element out of view. Default: 0 (fully out) */
+  leave?: number | "some" | "all";
+  /** Root margin for IntersectionObserver. Default: "0px" */
+  margin?: string;
+  /** Root element for IntersectionObserver */
+  root?: React.RefObject<Element>;
+}
+
+/**
+ * Result passed to SplitText callbacks (onSplit, onViewportEnter, onViewportLeave, onResplit).
+ *
+ * Contains arrays of split elements and a revert function for manual control.
+ * Empty arrays are returned for split types not requested in options.
+ */
+export interface SplitTextElements {
+  /** Array of character span elements */
+  chars: HTMLSpanElement[];
+  /** Array of word span elements */
+  words: HTMLSpanElement[];
+  /** Array of line span elements */
+  lines: HTMLSpanElement[];
+  /** Revert to original HTML and cleanup observers */
+  revert: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+type ControlledWrapperHTMLKeys =
+  | "children"
+  | "className"
+  | "style"
+  | "ref"
+  | "as"
+  | "onSplit"
+  | "onResplit"
+  | "options"
+  | "autoSplit"
+  | "revertOnComplete"
+  | "viewport"
+  | "onViewportEnter"
+  | "onViewportLeave"
+  | "onRevert"
+  | "initialStyles"
+  | "initialClasses"
+  | "resetOnViewportLeave"
+  | "waitForFonts";
+
+type WrapperHTMLProps = Omit<
+  React.HTMLAttributes<HTMLElement>,
+  ControlledWrapperHTMLKeys
+>;
+
+interface SplitTextProps extends WrapperHTMLProps {
+  children: ReactElement;
+  /** The wrapper element type. Default: "div" */
+  as?: keyof HTMLElementTagNameMap;
+  /** Class name for the wrapper element */
+  className?: string;
+  /** Additional styles for the wrapper element (merged with internal styles) */
+  style?: React.CSSProperties;
+  /**
+   * Called after text is split.
+   * Return an animation or promise to enable revert (requires revertOnComplete).
+   */
+  onSplit?: (result: SplitTextElements) => AnimationCallbackReturn;
+  /** Called when autoSplit/full-resplit replaces split output elements */
+  onResplit?: (result: SplitTextElements) => void;
+  options?: SplitTextOptions;
+  autoSplit?: boolean;
+  /** When true, reverts to original HTML after animation promise resolves */
+  revertOnComplete?: boolean;
+  /** Viewport observer options (replaces `inView`). Configures IntersectionObserver. */
+  viewport?: ViewportOptions;
+  /** Called when element enters viewport (replaces `onInView`). Return animation for revertOnComplete support */
+  onViewportEnter?: (result: SplitTextElements) => AnimationCallbackReturn;
+  /** Called when element leaves viewport (replaces `onLeaveView`) */
+  onViewportLeave?: (result: SplitTextElements) => AnimationCallbackReturn;
+  /** Called when split text is reverted (manual or automatic) */
+  onRevert?: () => void;
+  /** Apply initial inline styles to elements after split (and after kerning compensation).
+   * Can be a static style object or a function that receives (element, index). */
+  initialStyles?: InitialStyles;
+  /** Apply initial classes to elements after split (and after kerning compensation).
+   * Classes are added via classList.add() and support space-separated class names. */
+  initialClasses?: InitialClasses;
+  /** Re-apply initialStyles/initialClasses when element leaves viewport.
+   * Useful for scroll-triggered animations that should reset when scrolling away. */
+  resetOnViewportLeave?: boolean;
+  /** Wait for `document.fonts.ready` before splitting. Disable for immediate split. */
+  waitForFonts?: boolean;
+}
+
+/**
+ * React component wrapper for text splitting with kerning compensation.
+ *
+ * Wraps a single child element and splits its text content into characters,
+ * words, and/or lines. Handles lifecycle cleanup automatically on unmount.
+ *
+ * Supports callback mode via `onSplit`, `onViewportEnter`, `onViewportLeave`.
+ *
+ * @param props - Component props including callbacks and options
+ * @returns The child element wrapped in a container div
+ *
+ * @example
+ * ```tsx
+ * import { SplitText } from "griffo/react";
+ * import { animate, stagger } from "motion";
+ *
+ * // Imperative animation
+ * <SplitText
+ *   onSplit={({ words }) => {
+ *     animate(words, { opacity: [0, 1], y: [20, 0] }, { delay: stagger(0.05) });
+ *   }}
+ * >
+ *   <h1>Animated Text</h1>
+ * </SplitText>
+ * ```
+ */
+export const SplitText = forwardRef<HTMLElement, SplitTextProps>(
+  function SplitText(
+    {
+      children,
+      as: Component = "div",
+      className,
+      style: userStyle,
+      onSplit,
+      onResplit,
+      options,
+      autoSplit = false,
+      revertOnComplete = false,
+      viewport,
+      onViewportEnter,
+      onViewportLeave,
+      onRevert,
+      initialStyles,
+      initialClasses,
+      resetOnViewportLeave = false,
+      waitForFonts = true,
+      ...wrapperProps
+    },
+    forwardedRef
+  ) {
+    const containerRef = useRef<HTMLElement>(null);
+
+    // Merge internal ref with forwarded ref
+    const mergedRef = useCallback(
+      (node: HTMLElement | null) => {
+        containerRef.current = node;
+        if (typeof forwardedRef === "function") {
+          forwardedRef(node);
+        } else if (forwardedRef) {
+          forwardedRef.current = node;
+        }
+      },
+      [forwardedRef]
+    );
+
+    const [childElement, setChildElement] = useState<HTMLElement | null>(null);
+    const [isInView, setIsInView] = useState(false);
+
+    // Detect whether viewport observer is needed
+    const needsViewport = !!(
+      onViewportEnter ||
+      onViewportLeave ||
+      resetOnViewportLeave ||
+      viewport
+    );
+
+    // Stable refs for callbacks and options
+    const onSplitRef = useRef(onSplit);
+    const onResplitRef = useRef(onResplit);
+    const optionsRef = useRef(options);
+    const revertOnCompleteRef = useRef(revertOnComplete);
+    const viewportRef = useRef(viewport);
+    const onViewportEnterRef = useRef(onViewportEnter);
+    const onViewportLeaveRef = useRef(onViewportLeave);
+    const onRevertRef = useRef(onRevert);
+    const initialStylesRef = useRef(initialStyles);
+    const initialClassesRef = useRef(initialClasses);
+    const resetOnViewportLeaveRef = useRef(resetOnViewportLeave);
+
+    useLayoutEffect(() => {
+      onSplitRef.current = onSplit;
+      onResplitRef.current = onResplit;
+      optionsRef.current = options;
+      revertOnCompleteRef.current = revertOnComplete;
+      viewportRef.current = viewport;
+      onViewportEnterRef.current = onViewportEnter;
+      onViewportLeaveRef.current = onViewportLeave;
+      onRevertRef.current = onRevert;
+      initialStylesRef.current = initialStyles;
+      initialClassesRef.current = initialClasses;
+      resetOnViewportLeaveRef.current = resetOnViewportLeave;
+    });
+
+    // Refs for tracking state
+    const hasSplitRef = useRef(false);
+    const hasRevertedRef = useRef(false);
+    const revertFnRef = useRef<(() => void) | null>(null);
+    const splitResultRef = useRef<SplitTextElements | null>(null);
+    const observerRef = useRef<IntersectionObserver | null>(null);
+    const hasTriggeredOnceRef = useRef(false);
+
+    useLayoutEffect(() => {
+      const element = containerRef.current?.firstElementChild;
+      setChildElement(element instanceof HTMLElement ? element : null);
+    }, [children]);
+
+    // Initial split
+    useEffect(() => {
+      if (!childElement) return;
+      if (hasSplitRef.current) return;
+
+      let isMounted = true;
+
+      waitForFontsReady(waitForFonts).then(() => {
+        if (!isMounted || hasSplitRef.current) return;
+        if (!containerRef.current) return;
+
+        let coreRevert: (() => void) | null = null;
+        const revert = () => {
+          if (hasRevertedRef.current) return;
+          hasRevertedRef.current = true;
+          try {
+            onRevertRef.current?.();
+          } finally {
+            coreRevert?.();
+          }
+        };
+
+        // Use core splitText with autoSplit feature
+        const result = splitText(childElement, {
+          ...optionsRef.current,
+          autoSplit,
+          revertOnComplete: revertOnCompleteRef.current,
+          initialStyles: initialStylesRef.current,
+          initialClasses: initialClassesRef.current,
+          onResplit: (resizeResult) => {
+            // Update stored result with new elements but same wrapped revert.
+            const newSplitTextElements: SplitTextElements = {
+              chars: resizeResult.chars,
+              words: resizeResult.words,
+              lines: resizeResult.lines,
+              revert,
+            };
+            splitResultRef.current = newSplitTextElements;
+            onResplitRef.current?.(newSplitTextElements);
+          },
+        });
+        coreRevert = result.revert;
+
+        // Store revert function for cleanup
+        revertFnRef.current = revert;
+
+        hasSplitRef.current = true;
+
+        // Create result object with revert exposed
+        const splitElements: SplitTextElements = {
+          chars: result.chars,
+          words: result.words,
+          lines: result.lines,
+          revert,
+        };
+        splitResultRef.current = splitElements;
+
+        // Reveal after split
+        containerRef.current!.style.visibility = "visible";
+
+        // Call onSplit if provided
+        if (onSplitRef.current) {
+          const callbackResult = onSplitRef.current(splitElements);
+
+          // Handle revertOnComplete for onSplit (only when viewport is NOT enabled)
+          if (!needsViewport && revertOnCompleteRef.current) {
+            const promise = normalizeToPromise(callbackResult);
+            if (promise) {
+              promise
+                .then(() => {
+                  if (!isMounted || hasRevertedRef.current) return;
+                  splitElements.revert();
+                })
+                .catch(() => {
+                  console.warn("[griffo] Animation rejected, text not reverted");
+                });
+            } else if (callbackResult === undefined) {
+              // No warning if onSplit didn't return anything - user might be setting up state
+            } else {
+              console.warn(
+                "SplitText: revertOnComplete is enabled but onSplit did not return an animation or promise."
+              );
+            }
+          }
+        }
+
+        // Set up IntersectionObserver if viewport callbacks are present
+        if (needsViewport && containerRef.current) {
+          observerRef.current = createViewportObserver(
+            viewportRef.current,
+            hasTriggeredOnceRef,
+            () => setIsInView(true),
+            () => setIsInView(false)
+          );
+          observerRef.current.observe(containerRef.current);
+        }
+      });
+
+      return () => {
+        isMounted = false;
+        // Cleanup observer
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+          observerRef.current = null;
+        }
+        // Cleanup on unmount
+        if (revertFnRef.current) {
+          revertFnRef.current();
+        }
+        // Reset for StrictMode remount
+        hasSplitRef.current = false;
+      };
+    }, [childElement, autoSplit, needsViewport, waitForFonts]);
+
+    // Handle isInView changes
+    useEffect(() => {
+      if (!splitResultRef.current) return;
+      if (hasRevertedRef.current) return;
+
+      if (isInView && onViewportEnterRef.current) {
+        const callbackResult = onViewportEnterRef.current(
+          splitResultRef.current
+        );
+        const promise = normalizeToPromise(callbackResult);
+
+        if (revertOnCompleteRef.current && promise) {
+          promise
+            .then(() => {
+              if (hasRevertedRef.current) return;
+              splitResultRef.current?.revert();
+            })
+            .catch(() => {
+              console.warn("[griffo] Animation rejected, text not reverted");
+            });
+        }
+      } else if (!isInView && splitResultRef.current) {
+        // Re-apply initial styles/classes when leaving viewport
+        if (resetOnViewportLeaveRef.current) {
+          const { chars, words, lines } = splitResultRef.current;
+          const styles = initialStylesRef.current;
+          const classes = initialClassesRef.current;
+
+          if (styles) {
+            reapplyInitialStyles(chars, styles.chars);
+            reapplyInitialStyles(words, styles.words);
+            reapplyInitialStyles(lines, styles.lines);
+          }
+
+          if (classes) {
+            reapplyInitialClasses(chars, classes.chars);
+            reapplyInitialClasses(words, classes.words);
+            reapplyInitialClasses(lines, classes.lines);
+          }
+        }
+
+        // Call onViewportLeave callback if provided
+        if (onViewportLeaveRef.current) {
+          onViewportLeaveRef.current(splitResultRef.current);
+        }
+      }
+    }, [isInView]);
+
+    if (!isValidElement(children)) {
+      console.error("SplitText: children must be a single valid React element");
+      return null;
+    }
+
+    const Wrapper = Component;
+    return createElement(
+      Wrapper,
+      {
+        ref: mergedRef,
+        "data-griffo-auto-split-wrapper": "true",
+        ...wrapperProps,
+        className,
+        style: {
+          visibility: waitForFonts ? "hidden" : "visible",
+          position: "relative",
+          ...userStyle,
+        },
+      },
+      children
+    );
+  }
+);

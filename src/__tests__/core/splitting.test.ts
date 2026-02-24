@@ -1,0 +1,770 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { splitText } from "../../core/splitText";
+
+describe("splitText", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    document.body.removeChild(container);
+  });
+
+  describe("basic splitting", () => {
+    it("splits a simple word into characters", () => {
+      const element = document.createElement("h1");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars" });
+
+      expect(result.chars).toHaveLength(5);
+      expect(result.chars.map((c) => c.textContent)).toEqual([
+        "H",
+        "e",
+        "l",
+        "l",
+        "o",
+      ]);
+    });
+
+    it("splits multiple words into words array", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      expect(result.words).toHaveLength(2);
+      expect(result.words.map((w) => w.textContent)).toEqual([
+        "Hello",
+        "World",
+      ]);
+    });
+
+    it("splits text into chars, words, and lines by default", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      expect(result.chars.length).toBeGreaterThan(0);
+      expect(result.words.length).toBeGreaterThan(0);
+      expect(result.lines.length).toBeGreaterThan(0);
+    });
+
+    it("returns correct character count for multi-word text", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars" });
+
+      // "Hello World" = 11 characters (including space as word separator)
+      expect(result.chars).toHaveLength(10); // Space is not a char span
+    });
+
+    it("measures kerning in a shared document-level root", () => {
+      const rootsBefore = document.querySelectorAll('[data-griffo-kerning-root="true"]').length;
+
+      const first = document.createElement("p");
+      first.textContent = "Hello";
+      container.appendChild(first);
+      splitText(first, { type: "chars" });
+
+      const rootsAfterFirst = document.querySelectorAll('[data-griffo-kerning-root="true"]').length;
+      expect(rootsAfterFirst).toBe(rootsBefore + (rootsBefore === 0 ? 1 : 0));
+
+      const second = document.createElement("p");
+      second.textContent = "World";
+      container.appendChild(second);
+      splitText(second, { type: "chars" });
+
+      const rootsAfterSecond = document.querySelectorAll('[data-griffo-kerning-root="true"]').length;
+      expect(rootsAfterSecond).toBe(rootsAfterFirst);
+
+      const root = document.querySelector('[data-griffo-kerning-root="true"]');
+      expect(root).not.toBeNull();
+      expect(container.contains(root)).toBe(false);
+    });
+
+    it("uses legacy in-container measurement when isolateKerningMeasurement is false", () => {
+      document
+        .querySelectorAll('[data-griffo-kerning-root="true"]')
+        .forEach((root) => root.remove());
+
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      splitText(
+        element,
+        { type: "chars", isolateKerningMeasurement: false } as any
+      );
+
+      const roots = document.querySelectorAll('[data-griffo-kerning-root="true"]');
+      expect(roots).toHaveLength(0);
+    });
+  });
+
+  describe("nested elements", () => {
+    it("preserves anchor tag with href attribute", () => {
+      const element = document.createElement("p");
+      element.innerHTML = 'Click <a href="/link">here</a>';
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars,words" });
+
+      // Find chars that are inside an anchor
+      const anchorChars = result.chars.filter((c) => {
+        let parent = c.parentElement;
+        while (parent && parent !== element) {
+          if (parent.tagName.toLowerCase() === "a") {
+            return true;
+          }
+          parent = parent.parentElement;
+        }
+        return false;
+      });
+
+      expect(anchorChars.length).toBeGreaterThan(0);
+
+      // Find the anchor element
+      const anchor = element.querySelector("a");
+      expect(anchor).not.toBeNull();
+      expect(anchor?.getAttribute("href")).toBe("/link");
+    });
+
+    it("preserves strong and em tags", () => {
+      const element = document.createElement("p");
+      element.innerHTML = "This is <strong>bold</strong> and <em>italic</em>";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      expect(result.words.length).toBeGreaterThan(0);
+
+      // Check that strong and em are preserved in the output
+      expect(element.querySelector("strong")).not.toBeNull();
+      expect(element.querySelector("em")).not.toBeNull();
+    });
+  });
+
+  describe("dash handling", () => {
+    it("splits at em-dash and marks continuation with noSpaceBefore", () => {
+      const element = document.createElement("h1");
+      element.textContent = "word—continuation";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      // Should create two word spans: "word—" and "continuation"
+      expect(result.words).toHaveLength(2);
+      expect(result.words[0].textContent).toBe("word—");
+      expect(result.words[1].textContent).toBe("continuation");
+
+      // No space should appear between them in the output
+      expect(element.textContent).toBe("word—continuation");
+    });
+
+    it("splits at en-dash", () => {
+      const element = document.createElement("p");
+      element.textContent = "2020–2021";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      expect(result.words).toHaveLength(2);
+      expect(result.words[0].textContent).toBe("2020–");
+      expect(result.words[1].textContent).toBe("2021");
+    });
+  });
+
+  describe("mask wrappers", () => {
+    it("creates overflow:clip wrappers for chars when mask='chars'", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars", mask: "chars" });
+
+      // Each char should be wrapped in a mask wrapper
+      result.chars.forEach((char) => {
+        const wrapper = char.parentElement;
+        expect(wrapper).not.toBeNull();
+        expect(wrapper?.style.overflow).toBe("clip");
+      });
+    });
+
+    it("creates overflow:clip wrappers for words when mask='words'", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words", mask: "words" });
+
+      // Each word should be wrapped in a mask wrapper
+      result.words.forEach((word) => {
+        const wrapper = word.parentElement;
+        expect(wrapper).not.toBeNull();
+        expect(wrapper?.style.overflow).toBe("clip");
+      });
+    });
+
+    it("creates overflow:clip wrappers for lines when mask='lines'", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "lines", mask: "lines" });
+
+      // Each line should be wrapped in a mask wrapper
+      result.lines.forEach((line) => {
+        const wrapper = line.parentElement;
+        expect(wrapper).not.toBeNull();
+        expect(wrapper?.style.overflow).toBe("clip");
+      });
+    });
+  });
+
+  describe("hard break boundaries", () => {
+    it("preserves explicit <br> boundaries when splitting chars", () => {
+      const element = document.createElement("h1");
+      element.innerHTML = "AB<br>CD";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars" });
+
+      expect(result.chars.map((char) => char.textContent)).toEqual([
+        "A",
+        "B",
+        "C",
+        "D",
+      ]);
+      expect(element.querySelectorAll("br")).toHaveLength(1);
+    });
+
+    it("preserves explicit <br> boundaries when splitting words", () => {
+      const element = document.createElement("h1");
+      element.innerHTML = "First<br>Second";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      expect(result.words).toHaveLength(2);
+      expect(result.words.map((word) => word.textContent)).toEqual([
+        "First",
+        "Second",
+      ]);
+      expect(element.querySelectorAll("br")).toHaveLength(1);
+    });
+
+    it("normalizes block descendant boundaries to <br> for word splitting", () => {
+      const element = document.createElement("h1");
+      element.innerHTML =
+        '<span style="display:block">Alpha</span><span style="display:block">Beta</span>';
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      expect(result.words).toHaveLength(2);
+      expect(result.words.map((word) => word.textContent)).toEqual([
+        "Alpha",
+        "Beta",
+      ]);
+      expect(element.querySelectorAll("br")).toHaveLength(1);
+    });
+
+    it("creates separate line groups for explicit block boundaries", () => {
+      const element = document.createElement("h1");
+      element.innerHTML =
+        '<span style="display:block">Line one</span><span style="display:block">Line two</span>';
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars,lines", mask: "chars" });
+
+      expect(result.lines).toHaveLength(2);
+      expect(result.lines.map((line) => line.textContent)).toEqual([
+        "Line one",
+        "Line two",
+      ]);
+    });
+
+    it("does not inject spaces across hard break boundaries", () => {
+      const element = document.createElement("h1");
+      element.innerHTML = "One<br>Two";
+      container.appendChild(element);
+
+      splitText(element, { type: "words" });
+
+      expect(element.textContent).toBe("OneTwo");
+    });
+  });
+
+  describe("revert functionality", () => {
+    it("restores original HTML when revert is called", () => {
+      const element = document.createElement("p");
+      const originalHTML = "Hello World";
+      element.innerHTML = originalHTML;
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      // Verify text is split
+      expect(element.querySelectorAll(".split-char").length).toBeGreaterThan(0);
+
+      // Revert
+      result.revert();
+
+      // Verify original HTML is restored
+      expect(element.innerHTML).toBe(originalHTML);
+    });
+
+    it("removes aria-label on revert", () => {
+      const element = document.createElement("h1");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      expect(element.getAttribute("aria-label")).toBe("Hello");
+
+      result.revert();
+
+      expect(element.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("sets aria-label when absent on supported elements", () => {
+      const element = document.createElement("h2");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      splitText(element);
+
+      expect(element.getAttribute("aria-label")).toBe("Hello");
+    });
+
+    it("preserves pre-existing aria-label through split and revert", () => {
+      const element = document.createElement("h1");
+      element.textContent = "Hello";
+      element.setAttribute("aria-label", "Custom label");
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      // Should not overwrite author-provided aria-label
+      expect(element.getAttribute("aria-label")).toBe("Custom label");
+
+      result.revert();
+
+      expect(element.getAttribute("aria-label")).toBe("Custom label");
+    });
+
+    it("does not set aria-label for generic elements", () => {
+      const element = document.createElement("div");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      splitText(element);
+
+      expect(element.hasAttribute("aria-label")).toBe(false);
+    });
+
+    it("preserves aria-label for nested content elements", () => {
+      const element = document.createElement("button");
+      element.setAttribute("aria-label", "Custom label");
+      element.innerHTML = "<span>Hello</span><span>World</span>";
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      expect(element.getAttribute("aria-label")).toBe("Custom label");
+
+      result.revert();
+
+      expect(element.getAttribute("aria-label")).toBe("Custom label");
+    });
+
+    it("does not add aria-label for nested content elements without one", () => {
+      const element = document.createElement("button");
+      element.innerHTML = "<span>Hello</span><span>World</span>";
+      container.appendChild(element);
+
+      splitText(element);
+
+      expect(element.hasAttribute("aria-label")).toBe(false);
+    });
+
+    it("keeps ligatures disabled after revert when chars were split", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      splitText(element, { type: "chars" }).revert();
+
+      expect(element.style.fontVariantLigatures).toBe("none");
+    });
+  });
+
+  describe("empty content handling", () => {
+    it("returns empty arrays for element with no text", () => {
+      const element = document.createElement("p");
+      element.textContent = "";
+      container.appendChild(element);
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = splitText(element);
+
+      expect(result.chars).toHaveLength(0);
+      expect(result.words).toHaveLength(0);
+      expect(result.lines).toHaveLength(0);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "splitText: element has no text content"
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it("returns empty arrays for whitespace-only content", () => {
+      const element = document.createElement("p");
+      element.textContent = "   ";
+      container.appendChild(element);
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = splitText(element);
+
+      expect(result.chars).toHaveLength(0);
+      expect(result.words).toHaveLength(0);
+      expect(result.lines).toHaveLength(0);
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe("input validation", () => {
+    it("throws error for non-HTMLElement input", () => {
+      const nonElement = { textContent: "Hello" };
+
+      expect(() => splitText(nonElement as HTMLElement)).toThrow(
+        "splitText: element must be an HTMLElement"
+      );
+    });
+
+    it("throws error for null input", () => {
+      expect(() => splitText(null as unknown as HTMLElement)).toThrow(
+        "splitText: element must be an HTMLElement"
+      );
+    });
+  });
+
+  describe("custom classes", () => {
+    it("applies custom char class", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const result = splitText(element, {
+        type: "chars",
+        charClass: "my-char",
+      });
+
+      result.chars.forEach((char) => {
+        expect(char.className).toBe("my-char");
+      });
+    });
+
+    it("applies custom word class", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, {
+        type: "words",
+        wordClass: "my-word",
+      });
+
+      result.words.forEach((word) => {
+        expect(word.className).toBe("my-word");
+      });
+    });
+
+    it("applies custom line class", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, {
+        type: "lines",
+        lineClass: "my-line",
+      });
+
+      result.lines.forEach((line) => {
+        expect(line.className).toBe("my-line");
+      });
+    });
+  });
+
+  describe("accessibility", () => {
+    it("adds aria-label and aria-hidden on each span for simple text in heading", () => {
+      const element = document.createElement("h1");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      // Headings support aria-label natively
+      expect(element.getAttribute("aria-label")).toBe("Hello World");
+
+      // Each word span should have aria-hidden (no wrapper needed)
+      result.words.forEach((word) => {
+        expect(word.getAttribute("aria-hidden")).toBe("true");
+      });
+
+      // No visual wrapper for heading with simple text
+      const visualWrapper = element.querySelector('[data-griffo-visual="true"]');
+      expect(visualWrapper).toBeNull();
+
+      // No sr-only copy for heading with simple text (aria-label is sufficient)
+      const srCopy = element.querySelector('[data-griffo-sr-copy="true"]');
+      expect(srCopy).toBeNull();
+    });
+
+    it("uses sr-only copy for simple text in generic elements", () => {
+      const element = document.createElement("span");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      splitText(element, { type: "words" });
+
+      // Generic elements don't support aria-label, so use sr-only approach
+      expect(element.getAttribute("aria-label")).toBeNull();
+
+      const visualWrapper = element.querySelector('[data-griffo-visual="true"]');
+      expect(visualWrapper).not.toBeNull();
+      expect(visualWrapper?.getAttribute("aria-hidden")).toBe("true");
+
+      const srCopy = element.querySelector('[data-griffo-sr-copy="true"]');
+      expect(srCopy).not.toBeNull();
+      expect(srCopy?.textContent).toBe("Hello World");
+    });
+
+    it("uses aria-hidden + sr-only for nested elements", () => {
+      const element = document.createElement("p");
+      element.innerHTML = 'Click <a href="/link">here</a> for more';
+      container.appendChild(element);
+
+      splitText(element, { type: "words" });
+
+      // Visual content should be wrapped with aria-hidden
+      const visualWrapper = element.querySelector('[data-griffo-visual="true"]');
+      expect(visualWrapper).not.toBeNull();
+      expect(visualWrapper?.getAttribute("aria-hidden")).toBe("true");
+
+      // Screen reader copy should exist with sr-only class
+      const srCopy = element.querySelector('[data-griffo-sr-copy="true"]');
+      expect(srCopy).not.toBeNull();
+      expect(srCopy?.classList.contains("griffo-sr-only")).toBe(true);
+
+      // Should NOT have aria-label (using sr-only approach instead)
+      expect(element.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("preserves semantic structure in sr-only copy", () => {
+      const element = document.createElement("p");
+      element.innerHTML = 'This has <strong>bold</strong> and <a href="/test">links</a>';
+      container.appendChild(element);
+
+      splitText(element, { type: "chars" });
+
+      const srCopy = element.querySelector('[data-griffo-sr-copy="true"]');
+      expect(srCopy).not.toBeNull();
+
+      // Check that the sr-only copy preserves the anchor with href
+      const srAnchor = srCopy?.querySelector("a");
+      expect(srAnchor).not.toBeNull();
+      expect(srAnchor?.getAttribute("href")).toBe("/test");
+
+      // Check that strong is preserved
+      const srStrong = srCopy?.querySelector("strong");
+      expect(srStrong).not.toBeNull();
+    });
+
+    it("removes aria-label on revert for simple text in heading", () => {
+      const element = document.createElement("h1");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      expect(element.getAttribute("aria-label")).toBe("Hello");
+
+      result.revert();
+
+      expect(element.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("removes sr-only copy on revert for simple text in generic element", () => {
+      const element = document.createElement("span");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const result = splitText(element);
+
+      expect(element.querySelector('[data-griffo-sr-copy="true"]')).not.toBeNull();
+
+      result.revert();
+
+      expect(element.querySelector('[data-griffo-sr-copy="true"]')).toBeNull();
+      expect(element.textContent).toBe("Hello");
+    });
+
+    it("removes visual wrapper and sr-copy on revert for nested elements", () => {
+      const element = document.createElement("p");
+      element.innerHTML = 'Click <a href="/link">here</a>';
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      // Verify structures exist before revert
+      expect(element.querySelector('[data-griffo-visual="true"]')).not.toBeNull();
+      expect(element.querySelector('[data-griffo-sr-copy="true"]')).not.toBeNull();
+
+      result.revert();
+
+      // After revert, accessibility structures should be removed (replaced by original HTML)
+      expect(element.querySelector('[data-griffo-visual="true"]')).toBeNull();
+      expect(element.querySelector('[data-griffo-sr-copy="true"]')).toBeNull();
+
+      // Original HTML should be restored
+      const anchor = element.querySelector("a");
+      expect(anchor).not.toBeNull();
+      expect(anchor?.getAttribute("href")).toBe("/link");
+      expect(anchor?.textContent).toBe("here");
+    });
+
+    it("injects sr-only styles into document head", () => {
+      const element = document.createElement("p");
+      element.innerHTML = 'Text with <em>emphasis</em>';
+      container.appendChild(element);
+
+      splitText(element, { type: "words" });
+
+      // Check that styles were injected
+      const styleElements = document.querySelectorAll("style");
+      const griffoStyle = Array.from(styleElements).find(
+        (s) => s.textContent?.includes("griffo-sr-only")
+      );
+      expect(griffoStyle).not.toBeNull();
+    });
+  });
+
+  describe("data attributes", () => {
+    it("adds data-char-index to each character", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hi";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars" });
+
+      expect(result.chars[0].dataset.charIndex).toBe("0");
+      expect(result.chars[1].dataset.charIndex).toBe("1");
+    });
+
+    it("adds data-word-index to each word", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello World";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "words" });
+
+      expect(result.words[0].dataset.wordIndex).toBe("0");
+      expect(result.words[1].dataset.wordIndex).toBe("1");
+    });
+  });
+
+  describe("propIndex option", () => {
+    it("adds CSS custom properties when propIndex is true", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hi";
+      container.appendChild(element);
+
+      const result = splitText(element, { type: "chars", propIndex: true });
+
+      expect(result.chars[0].style.getPropertyValue("--char-index")).toBe("0");
+      expect(result.chars[1].style.getPropertyValue("--char-index")).toBe("1");
+    });
+  });
+
+  describe("onSplit callback", () => {
+    it("calls onSplit with split elements", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const onSplit = vi.fn();
+
+      splitText(element, { type: "chars", onSplit });
+
+      expect(onSplit).toHaveBeenCalledTimes(1);
+      expect(onSplit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chars: expect.any(Array),
+          words: expect.any(Array),
+          lines: expect.any(Array),
+        })
+      );
+    });
+  });
+
+  describe("revertOnComplete", () => {
+    it("reverts after animation promise resolves", async () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const animationPromise = Promise.resolve();
+
+      splitText(element, {
+        type: "chars",
+        onSplit: () => ({ finished: animationPromise }),
+        revertOnComplete: true,
+      });
+
+      // Wait for promise to resolve and revert to happen
+      await animationPromise;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // Should be reverted to original
+      expect(element.textContent).toBe("Hello");
+    });
+  });
+
+  describe("type validation", () => {
+    it("warns and defaults when invalid type is provided", () => {
+      const element = document.createElement("p");
+      element.textContent = "Hello";
+      container.appendChild(element);
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = splitText(element, { type: "" as "chars" });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("type must include at least one of")
+      );
+
+      // Should default to chars,words,lines
+      expect(result.chars.length).toBeGreaterThan(0);
+      expect(result.words.length).toBeGreaterThan(0);
+      expect(result.lines.length).toBeGreaterThan(0);
+
+      consoleSpy.mockRestore();
+    });
+  });
+});

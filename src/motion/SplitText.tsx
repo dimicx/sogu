@@ -1,0 +1,2993 @@
+import { splitTextData } from "../internal/splitTextShared";
+import { normalizeToPromise } from "../core/splitText";
+import {
+  reapplyInitialStyles,
+  reapplyInitialClasses,
+} from "../internal/initialStyles";
+import {
+  applyKerningCompensation,
+  buildKerningStyleKey,
+  clearKerningCompensation,
+  querySplitWords,
+} from "../internal/kerningUpkeep";
+import {
+  getObservedWidth,
+  recordWidthChange,
+  resolveAutoSplitWidth,
+  resolveAutoSplitTargets,
+} from "../internal/autoSplitResize";
+import { buildLineFingerprintFromData } from "../internal/lineFingerprint";
+import { createViewportObserver } from "../internal/viewportObserver";
+import type { InitialStyles, InitialClasses } from "../internal/initialStyles";
+import { waitForFontsReady } from "../internal/waitForFontsReady";
+import { animate, scroll } from "motion";
+import { MotionConfig, motion, usePresence, useReducedMotion } from "motion/react";
+import type {
+  AnimationOptions,
+  AnimationSequence,
+  DOMKeyframesDefinition,
+  SequenceTime,
+} from "motion";
+import type { HTMLMotionProps } from "motion/react";
+import {
+  cloneElement,
+  createElement,
+  forwardRef,
+  isValidElement,
+  ReactElement,
+  ReactNode,
+  ForwardedRef,
+  RefAttributes,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  AnimationCallbackReturn,
+  SplitTextData,
+  SplitTextDataNode,
+} from "../core/splitText";
+
+export interface SplitTextOptions {
+  type?:
+    | "chars"
+    | "words"
+    | "lines"
+    | "chars,words"
+    | "words,lines"
+    | "chars,lines"
+    | "chars,words,lines";
+  charClass?: string;
+  wordClass?: string;
+  lineClass?: string;
+  /** Apply overflow mask wrapper to elements for reveal animations */
+  mask?: "lines" | "words" | "chars";
+  /** Debounce delay for autoSplit/full-resplit width updates in milliseconds (`0` disables debounce). */
+  resplitDebounceMs?: number;
+  propIndex?: boolean;
+  /** Skip kerning compensation (no margin adjustments applied).
+   * Kerning is naturally lost when splitting into inline-block spans.
+   * Use this if you prefer no compensation over imperfect Safari compensation. */
+  disableKerning?: boolean;
+}
+
+type InternalSplitTextOptions = SplitTextOptions & {
+  isolateKerningMeasurement?: boolean;
+};
+
+const DEFAULT_RESPLIT_DEBOUNCE_MS = 100;
+
+function resolveResplitDebounceMs(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return DEFAULT_RESPLIT_DEBOUNCE_MS;
+  }
+  return value;
+}
+
+interface ScrollPropOptions {
+  /** Scroll offsets. Default: Motion's default ["start end", "end start"] */
+  offset?: MotionScrollOffset;
+  /** Scroll axis. Default: "y" */
+  axis?: "x" | "y";
+  /** Custom scroll container ref. Default: nearest scrollable ancestor / window */
+  container?: React.RefObject<Element | null>;
+}
+
+/** Matches Motion's viewport prop */
+interface ViewportOptions {
+  /** Only trigger once. Default: false */
+  once?: boolean;
+  /** How much of the element must be visible. Motion supports "some" | "all" | number. Default: 0 */
+  amount?: number | "some" | "all";
+  /** How much visibility is required to consider the element out of view. Default: 0 (fully out) */
+  leave?: number | "some" | "all";
+  /** Root margin for IntersectionObserver. Default: "0px" */
+  margin?: string;
+  /** Root element for IntersectionObserver */
+  root?: React.RefObject<Element>;
+}
+
+/**
+ * Result passed to SplitText callbacks (onSplit, onViewportEnter, onViewportLeave, onResplit).
+ *
+ * Contains arrays of split elements and a revert function for manual control.
+ * Empty arrays are returned for split types not requested in options.
+ */
+export interface SplitTextElements {
+  /** Array of character span elements */
+  chars: HTMLSpanElement[];
+  /** Array of word span elements */
+  words: HTMLSpanElement[];
+  /** Array of line span elements */
+  lines: HTMLSpanElement[];
+  /** Revert to original HTML and cleanup observers */
+  revert: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Variant types
+// ---------------------------------------------------------------------------
+
+/** Motion-compatible animation target (passed directly to motion variants) */
+type VariantTarget = DOMKeyframesDefinition & {
+  transition?: AnimationOptions;
+};
+
+/** Info passed to function variant callbacks */
+export interface VariantInfo<TCustom = unknown> {
+  /** Relative index within nearest split parent (line > word > global) */
+  index: number;
+  /** Total elements in that parent group */
+  count: number;
+  /** Absolute index across all elements of this type */
+  globalIndex: number;
+  /** Total elements of this type across the entire split */
+  globalCount: number;
+  /** Parent line index (0 if lines not split) */
+  lineIndex: number;
+  /** Parent word index (0 if words not split) */
+  wordIndex: number;
+  /** User custom data passed to SplitText */
+  custom: TCustom | undefined;
+  /** AnimatePresence presence state */
+  isPresent: boolean;
+}
+
+type VariantResolver<TCustom = unknown> = (
+  info: VariantInfo<TCustom>
+) => VariantTarget;
+type WrapperVariantResolver<TCustom = unknown> = (
+  args: { custom?: TCustom }
+) => VariantTarget;
+type PerTypeVariant<TCustom = unknown> =
+  | VariantTarget
+  | VariantResolver<TCustom>;
+type WrapperVariant<TCustom = unknown> =
+  | VariantTarget
+  | WrapperVariantResolver<TCustom>;
+
+/** A variant: flat target, flat function, per-type targets (static or function), with optional transition */
+type VariantDefinition<TCustom = unknown> =
+  | VariantTarget
+  | VariantResolver<TCustom>
+  | {
+      chars?: PerTypeVariant<TCustom>;
+      words?: PerTypeVariant<TCustom>;
+      lines?: PerTypeVariant<TCustom>;
+      wrapper?: WrapperVariant<TCustom>;
+      transition?: AnimationOptions;
+    };
+
+type SplitTypeKey = "chars" | "words" | "lines";
+type DelayScope = "global" | "local";
+
+const ELEMENT_TYPE_KEYS: SplitTypeKey[] = ["chars", "words", "lines"];
+const VOID_HTML_TAGS = new Set(["br", "hr", "img", "input", "meta", "link"]);
+
+/** Detect per-type vs flat variant */
+type PerTypeVariants<TCustom = unknown> = Partial<
+  Record<SplitTypeKey, PerTypeVariant<TCustom>>
+> & {
+  wrapper?: WrapperVariant<TCustom>;
+  transition?: AnimationOptions;
+};
+
+function isPerTypeVariant<TCustom = unknown>(
+  v: VariantDefinition<TCustom>
+): v is PerTypeVariants<TCustom> {
+  if (typeof v !== "object" || v === null) return false;
+  return "chars" in v || "words" in v || "lines" in v || "wrapper" in v;
+}
+
+const ORCHESTRATION_KEYS = new Set([
+  "delayChildren",
+  "staggerChildren",
+  "staggerDirection",
+  "when",
+]);
+
+function pickOrchestration(
+  transition?: AnimationOptions
+): AnimationOptions | undefined {
+  if (!transition) return undefined;
+  const picked: AnimationOptions = {};
+  for (const key of ORCHESTRATION_KEYS) {
+    if (key in transition) {
+      (picked as Record<string, unknown>)[key] = (transition as Record<
+        string,
+        unknown
+      >)[key];
+    }
+  }
+  return Object.keys(picked).length ? picked : undefined;
+}
+
+function stripOrchestration(
+  transition?: AnimationOptions
+): AnimationOptions | undefined {
+  if (!transition) return undefined;
+  const stripped: AnimationOptions = {};
+  for (const [key, value] of Object.entries(transition)) {
+    if (!ORCHESTRATION_KEYS.has(key)) {
+      (stripped as Record<string, unknown>)[key] = value;
+    }
+  }
+  return Object.keys(stripped).length ? stripped : undefined;
+}
+
+function hasOrchestration(transition?: AnimationOptions): boolean {
+  if (!transition) return false;
+  for (const key of ORCHESTRATION_KEYS) {
+    if (key in transition) return true;
+  }
+  return false;
+}
+
+function getVariantTransition<TCustom = unknown>(
+  def: VariantDefinition<TCustom>
+): AnimationOptions | undefined {
+  if (typeof def !== "object" || def == null) return undefined;
+  if ("transition" in def) {
+    return (def as { transition?: AnimationOptions }).transition;
+  }
+  return undefined;
+}
+
+function withDefaultTransition<TCustom = unknown>(
+  target: PerTypeVariant<TCustom>,
+  defaultTransition: AnimationOptions | undefined,
+  delayScope: DelayScope
+): PerTypeVariant<TCustom> {
+  const needsDelayResolution = (transition?: AnimationOptions): boolean => {
+    const delay = transition?.delay as unknown;
+    if (typeof delay === "function") return true;
+    if (typeof delay === "number") return !Number.isFinite(delay);
+    return false;
+  };
+
+  const resolveDelay = (
+    delay: AnimationOptions["delay"],
+    info: VariantInfo<TCustom>
+  ): number | undefined => {
+    if (typeof delay === "function") {
+      const [index, count] =
+        delayScope === "local"
+          ? [info.index, info.count]
+          : [info.globalIndex, info.globalCount];
+      if (!Number.isFinite(index) || !Number.isFinite(count) || count <= 0) {
+        return undefined;
+      }
+      const value = delay(index, count);
+      return Number.isFinite(value) ? value : undefined;
+    }
+    if (typeof delay === "number") {
+      return Number.isFinite(delay) ? delay : undefined;
+    }
+    return undefined;
+  };
+
+  const mergeTransitions = (
+    base: AnimationOptions | undefined,
+    override: AnimationOptions | undefined,
+    info: VariantInfo<TCustom>
+  ): AnimationOptions | undefined => {
+    const merged: AnimationOptions = {
+      ...(base ?? {}),
+      ...(override ?? {}),
+    };
+
+    if ("delay" in merged) {
+      const resolved = resolveDelay(merged.delay, info);
+      if (resolved == null) {
+        delete (merged as { delay?: AnimationOptions["delay"] }).delay;
+      } else {
+        merged.delay = resolved;
+      }
+    }
+
+    return Object.keys(merged).length ? merged : undefined;
+  };
+
+  if (typeof target === "function") {
+    return (info: VariantInfo<TCustom>) => {
+      const resolved = target(info);
+      const transition = mergeTransitions(
+        defaultTransition,
+        resolved.transition,
+        info
+      );
+      if (transition) return { ...resolved, transition };
+      if (resolved.transition) {
+        const { transition: _removed, ...rest } = resolved;
+        return rest;
+      }
+      return resolved;
+    };
+  }
+
+  if (
+    needsDelayResolution(defaultTransition) ||
+    needsDelayResolution(target.transition)
+  ) {
+    return (info: VariantInfo<TCustom>) => {
+      const transition = mergeTransitions(
+        defaultTransition,
+        target.transition,
+        info
+      );
+      return transition ? { ...target, transition } : target;
+    };
+  }
+
+  if (!defaultTransition) return target;
+
+  if (!target.transition) {
+    return { ...target, transition: defaultTransition };
+  }
+
+  return {
+    ...target,
+    transition: { ...defaultTransition, ...target.transition },
+  };
+}
+
+function getTargetType(
+  data: SplitTextData,
+  type?: string
+): SplitTypeKey {
+  const hasChars = data.meta.type?.includes("chars");
+  const hasWords = data.meta.type?.includes("words");
+  const hasLines = data.meta.type?.includes("lines");
+
+  if (type?.includes("chars") && hasChars) return "chars";
+  if (type?.includes("words") && hasWords) return "words";
+  if (type?.includes("lines") && hasLines) return "lines";
+
+  if (hasChars) return "chars";
+  if (hasWords) return "words";
+  return "lines";
+}
+
+function buildVariantsByType<TCustom = unknown>(
+  variants: Record<string, VariantDefinition<TCustom>> | undefined,
+  targetType: SplitTypeKey,
+  childDefaultTransition: AnimationOptions | undefined,
+  delayScope: DelayScope,
+  forceInstant = false
+): {
+  types: Partial<Record<SplitTypeKey, Record<string, PerTypeVariant<TCustom>>>>;
+  wrapper: Record<string, WrapperVariant<TCustom>>;
+} {
+  if (!variants) return { types: {}, wrapper: {} };
+
+  const result: Partial<
+    Record<SplitTypeKey, Record<string, PerTypeVariant<TCustom>>>
+  > = {};
+  const wrapperVariants: Record<string, WrapperVariant<TCustom>> = {};
+  const instantTransition: AnimationOptions = { duration: 0, delay: 0 };
+  const applyInstant = (
+    target: PerTypeVariant<TCustom>
+  ): PerTypeVariant<TCustom> => {
+    if (typeof target === "function") {
+      return (info: VariantInfo<TCustom>) => {
+        const resolved = target(info);
+        return { ...resolved, transition: instantTransition };
+      };
+    }
+    return { ...target, transition: instantTransition };
+  };
+  const applyInstantWrapper = (
+    target: WrapperVariant<TCustom>
+  ): WrapperVariant<TCustom> => {
+    if (typeof target === "function") {
+      return ({ custom }: { custom?: TCustom }) => {
+        const resolved = target({ custom });
+        return { ...resolved, transition: instantTransition };
+      };
+    }
+    return { ...target, transition: instantTransition };
+  };
+
+  for (const [name, def] of Object.entries(variants)) {
+    const defaultTransition = isPerTypeVariant<TCustom>(def)
+      ? def.transition ?? childDefaultTransition
+      : childDefaultTransition;
+    const resolvedDefault = forceInstant ? instantTransition : defaultTransition;
+
+    if (isPerTypeVariant<TCustom>(def)) {
+      if (def.wrapper) {
+        wrapperVariants[name] = forceInstant
+          ? applyInstantWrapper(def.wrapper)
+          : def.wrapper;
+      }
+      for (const key of ELEMENT_TYPE_KEYS) {
+        const perType = def[key];
+        if (!perType) continue;
+        const entry = forceInstant
+          ? applyInstant(perType)
+          : withDefaultTransition(perType, resolvedDefault, delayScope);
+        if (!result[key]) result[key] = {};
+        result[key]![name] = entry;
+      }
+      continue;
+    }
+
+    if (targetType) {
+      const entry = forceInstant
+        ? applyInstant(def)
+        : withDefaultTransition(def, resolvedDefault, delayScope);
+      if (!result[targetType]) result[targetType] = {};
+      result[targetType]![name] = entry;
+    }
+  }
+
+  return { types: result, wrapper: wrapperVariants };
+}
+
+// ---------------------------------------------------------------------------
+// Index maps for function variants (data-driven)
+// ---------------------------------------------------------------------------
+
+interface IndexMaps {
+  charToWord: number[];
+  charToLine: number[];
+  wordToLine: number[];
+  /** Relative index + group count per element, keyed by parent */
+  charInWord: number[];
+  charCountInWord: number[];
+  charInLine: number[];
+  charCountInLine: number[];
+  wordInLine: number[];
+  wordCountInLine: number[];
+}
+
+interface RelationMaps {
+  charToWord: number[];
+  charToLine: number[];
+  wordToLine: number[];
+  counts: { chars: number; words: number; lines: number };
+}
+
+interface SplitDataLayout {
+  relations: RelationMaps;
+  maps: IndexMaps;
+  propsByNode: Map<SplitTextDataNode, Record<string, unknown>>;
+}
+
+function collectRelations(nodes: SplitTextDataNode[]): RelationMaps {
+  const charToWord: number[] = [];
+  const charToLine: number[] = [];
+  const wordToLine: number[] = [];
+  const counts = { chars: 0, words: 0, lines: 0 };
+
+  const walk = (
+    list: SplitTextDataNode[],
+    context: { lineIndex: number | null; wordIndex: number | null }
+  ) => {
+    for (const node of list) {
+      if (node.type !== "element") continue;
+
+      let nextContext = context;
+      if (node.split === "line") {
+        const lineIndex = counts.lines++;
+        nextContext = { ...context, lineIndex };
+      }
+      if (node.split === "word") {
+        const wordIndex = counts.words++;
+        if (nextContext.lineIndex != null) {
+          wordToLine[wordIndex] = nextContext.lineIndex;
+        }
+        nextContext = { ...nextContext, wordIndex };
+      }
+      if (node.split === "char") {
+        const charIndex = counts.chars++;
+        charToWord[charIndex] =
+          nextContext.wordIndex != null ? nextContext.wordIndex : -1;
+        charToLine[charIndex] =
+          nextContext.lineIndex != null ? nextContext.lineIndex : -1;
+      }
+
+      walk(node.children, nextContext);
+    }
+  };
+
+  walk(nodes, { lineIndex: null, wordIndex: null });
+
+  if (counts.words === 0) {
+    charToWord.length = 0;
+  } else {
+    for (let i = 0; i < charToWord.length; i++) {
+      if (charToWord[i] < 0) charToWord[i] = 0;
+    }
+  }
+
+  if (counts.lines === 0) {
+    charToLine.length = 0;
+    wordToLine.length = 0;
+  } else {
+    for (let i = 0; i < charToLine.length; i++) {
+      if (charToLine[i] < 0) charToLine[i] = 0;
+    }
+    for (let i = 0; i < wordToLine.length; i++) {
+      if (wordToLine[i] == null) wordToLine[i] = 0;
+    }
+  }
+
+  return { charToWord, charToLine, wordToLine, counts };
+}
+
+/** Compute relative indices and group counts from a parent-group mapping array. */
+function computeGroupIndices(
+  parentMap: number[]
+): { indices: number[]; counts: number[] } {
+  const indices: number[] = [];
+  const counts: number[] = [];
+  if (!parentMap.length) return { indices, counts };
+
+  let prev = -1;
+  let counter = 0;
+  for (let i = 0; i < parentMap.length; i++) {
+    if (parentMap[i] !== prev) {
+      counter = 0;
+      prev = parentMap[i];
+    }
+    indices[i] = counter++;
+  }
+  const countByGroup: number[] = [];
+  for (let i = indices.length - 1; i >= 0; i--) {
+    if (i === indices.length - 1 || parentMap[i] !== parentMap[i + 1]) {
+      countByGroup[parentMap[i]] = indices[i] + 1;
+    }
+  }
+  for (let i = 0; i < parentMap.length; i++) {
+    counts[i] = countByGroup[parentMap[i]];
+  }
+  return { indices, counts };
+}
+
+function buildIndexMaps(relations: RelationMaps): IndexMaps {
+  const { charToWord, charToLine, wordToLine } = relations;
+
+  const ciw = computeGroupIndices(charToWord);
+  const cil = computeGroupIndices(charToLine);
+  const wil = computeGroupIndices(wordToLine);
+
+  return {
+    charToWord,
+    charToLine,
+    wordToLine,
+    charInWord: ciw.indices,
+    charCountInWord: ciw.counts,
+    charInLine: cil.indices,
+    charCountInLine: cil.counts,
+    wordInLine: wil.indices,
+    wordCountInLine: wil.counts,
+  };
+}
+
+function buildVariantInfo<TCustom = unknown>(
+  elementType: SplitTypeKey,
+  globalIndex: number,
+  total: number,
+  maps: IndexMaps,
+  isPresent: boolean,
+  custom?: TCustom
+): VariantInfo<TCustom> {
+  if (elementType === "chars") {
+    const lineIndex = maps.charToLine.length
+      ? maps.charToLine[globalIndex]
+      : 0;
+    const wordIndex = maps.charToWord.length
+      ? maps.charToWord[globalIndex]
+      : 0;
+    const index = maps.charInLine.length
+      ? maps.charInLine[globalIndex]
+      : maps.charInWord.length
+        ? maps.charInWord[globalIndex]
+        : globalIndex;
+    const count = maps.charCountInLine.length
+      ? maps.charCountInLine[globalIndex]
+      : maps.charCountInWord.length
+        ? maps.charCountInWord[globalIndex]
+        : total;
+    return {
+      index,
+      count,
+      globalIndex,
+      globalCount: total,
+      lineIndex,
+      wordIndex,
+      custom,
+      isPresent,
+    };
+  }
+  if (elementType === "words") {
+    const lineIndex = maps.wordToLine.length
+      ? maps.wordToLine[globalIndex]
+      : 0;
+    const index = maps.wordInLine.length
+      ? maps.wordInLine[globalIndex]
+      : globalIndex;
+    const count = maps.wordCountInLine.length
+      ? maps.wordCountInLine[globalIndex]
+      : total;
+    return {
+      index,
+      count,
+      globalIndex,
+      globalCount: total,
+      lineIndex,
+      wordIndex: globalIndex,
+      custom,
+      isPresent,
+    };
+  }
+  return {
+    index: globalIndex,
+    count: total,
+    globalIndex,
+    globalCount: total,
+    lineIndex: globalIndex,
+    wordIndex: 0,
+    custom,
+    isPresent,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Imperative whileScroll helpers (variant definitions)
+// ---------------------------------------------------------------------------
+
+/** Get most granular element type for flat variants */
+function getTargetElements(
+  result: SplitTextElements,
+  type?: string
+): HTMLSpanElement[] {
+  if (type?.includes("chars")) return result.chars;
+  if (type?.includes("words")) return result.words;
+  if (type?.includes("lines")) return result.lines;
+  if (result.chars.length) return result.chars;
+  if (result.words.length) return result.words;
+  if (result.lines.length) return result.lines;
+  return [];
+}
+
+/** Get most granular element type name for flat variants */
+function getTargetTypeForElements(
+  result: SplitTextElements,
+  type?: string
+): SplitTypeKey {
+  if (type?.includes("chars")) return "chars";
+  if (type?.includes("words")) return "words";
+  if (type?.includes("lines")) return "lines";
+  if (result.chars.length) return "chars";
+  if (result.words.length) return "words";
+  return "lines";
+}
+
+/** Separate transition from animation props in a variant definition */
+function extractTransition(
+  variant: VariantTarget
+): { props: DOMKeyframesDefinition; transition?: AnimationOptions } {
+  const { transition, ...props } = variant;
+  return { props, transition };
+}
+
+function buildIndexMapsDom(result: SplitTextElements): IndexMaps {
+  const charToWord: number[] = [];
+  const charToLine: number[] = [];
+  const wordToLine: number[] = [];
+
+  if (result.chars.length && result.words.length) {
+    let wi = 0;
+    for (let ci = 0; ci < result.chars.length; ci++) {
+      while (
+        wi < result.words.length - 1 &&
+        !result.words[wi].contains(result.chars[ci])
+      )
+        wi++;
+      charToWord[ci] = wi;
+    }
+  }
+
+  if (result.words.length && result.lines.length) {
+    let li = 0;
+    for (let wi = 0; wi < result.words.length; wi++) {
+      while (
+        li < result.lines.length - 1 &&
+        !result.lines[li].contains(result.words[wi])
+      )
+        li++;
+      wordToLine[wi] = li;
+    }
+  }
+
+  if (result.chars.length && result.lines.length) {
+    if (charToWord.length && wordToLine.length) {
+      for (let ci = 0; ci < result.chars.length; ci++) {
+        charToLine[ci] = wordToLine[charToWord[ci]];
+      }
+    } else {
+      let li = 0;
+      for (let ci = 0; ci < result.chars.length; ci++) {
+        while (
+          li < result.lines.length - 1 &&
+          !result.lines[li].contains(result.chars[ci])
+        )
+          li++;
+        charToLine[ci] = li;
+      }
+    }
+  }
+
+  const ciw = computeGroupIndices(charToWord);
+  const cil = computeGroupIndices(charToLine);
+  const wil = computeGroupIndices(wordToLine);
+
+  return {
+    charToWord,
+    charToLine,
+    wordToLine,
+    charInWord: ciw.indices,
+    charCountInWord: ciw.counts,
+    charInLine: cil.indices,
+    charCountInLine: cil.counts,
+    wordInLine: wil.indices,
+    wordCountInLine: wil.counts,
+  };
+}
+
+type MotionAnimation = ReturnType<typeof animate>;
+type MotionScrollOptions = NonNullable<Parameters<typeof scroll>[1]>;
+type MotionScrollOffset = MotionScrollOptions["offset"];
+
+type FnAnimationItem = {
+  element: HTMLSpanElement;
+  props: DOMKeyframesDefinition;
+  transition?: AnimationOptions;
+};
+
+function buildStaticItems<TCustom = unknown>(
+  elements: HTMLSpanElement[],
+  elementType: SplitTypeKey,
+  props: DOMKeyframesDefinition,
+  transition: AnimationOptions | undefined,
+  maps: IndexMaps,
+  isPresent: boolean,
+  delayScope: DelayScope,
+  custom?: TCustom
+): FnAnimationItem[] {
+  const items: FnAnimationItem[] = [];
+  const total = elements.length;
+
+  for (let i = 0; i < total; i++) {
+    const info = buildVariantInfo(
+      elementType,
+      i,
+      total,
+      maps,
+      isPresent,
+      custom
+    );
+
+    let merged = transition ? { ...transition } : undefined;
+    if (merged && "delay" in merged) {
+      const rawDelay = merged.delay;
+      const resolvedDelay =
+        typeof rawDelay === "function"
+          ? rawDelay(
+              delayScope === "local" ? info.index : info.globalIndex,
+              delayScope === "local" ? info.count : info.globalCount
+            )
+          : rawDelay;
+      if (resolvedDelay != null && Number.isFinite(resolvedDelay)) {
+        merged.delay = resolvedDelay;
+      } else {
+        const { delay: _removed, ...restNoDelay } = merged;
+        merged = restNoDelay;
+      }
+    }
+
+    items.push({
+      element: elements[i],
+      props,
+      transition:
+        merged && Object.keys(merged).length ? merged : undefined,
+    });
+  }
+
+  return items;
+}
+
+function buildSequenceFromItems(items: FnAnimationItem[]): AnimationSequence {
+  return items.map((item) => {
+    const sequenceTransition: AnimationOptions & { at?: SequenceTime } =
+      item.transition ? { ...item.transition } : {};
+    const delay = sequenceTransition.delay;
+    const hasExplicitAt = sequenceTransition.at != null;
+    const at = hasExplicitAt
+      ? sequenceTransition.at
+      : typeof delay === "number" && Number.isFinite(delay)
+        ? delay
+        : 0;
+
+    if ("delay" in sequenceTransition) {
+      delete sequenceTransition.delay;
+    }
+
+    sequenceTransition.at = at;
+    return [item.element, item.props, sequenceTransition];
+  });
+}
+
+function buildFnItems<TCustom = unknown>(
+  elements: HTMLSpanElement[],
+  elementType: SplitTypeKey,
+  fn: VariantResolver<TCustom>,
+  maps: IndexMaps,
+  transition: AnimationOptions | undefined,
+  isPresent: boolean,
+  delayScope: DelayScope,
+  custom?: TCustom,
+  forceInstant = false
+): FnAnimationItem[] {
+  const t = transition;
+  const { delay: outerDelay, duration, ...rest } = t || {};
+  const items: FnAnimationItem[] = [];
+  const total = elements.length;
+  const instantTransition = { duration: 0, delay: 0 };
+
+  for (let i = 0; i < total; i++) {
+    const info = buildVariantInfo(
+      elementType,
+      i,
+      total,
+      maps,
+      isPresent,
+      custom
+    );
+    const { transition: localT, ...props } = fn(info);
+    let merged: AnimationOptions | undefined;
+    if (forceInstant) {
+      merged = instantTransition;
+    } else {
+      merged = localT ? { ...rest, ...localT } : { ...rest };
+      if (duration != null && merged.duration == null) {
+        merged = { ...merged, duration };
+      }
+      const rawDelay = merged.delay ?? outerDelay;
+      const resolvedDelay =
+        typeof rawDelay === "function"
+          ? rawDelay(
+              delayScope === "local" ? info.index : info.globalIndex,
+              delayScope === "local" ? info.count : info.globalCount
+            )
+          : rawDelay;
+      if (resolvedDelay != null && Number.isFinite(resolvedDelay)) {
+        merged = { ...merged, delay: resolvedDelay };
+      } else if ("delay" in merged) {
+        const { delay: _removed, ...restNoDelay } = merged;
+        merged = restNoDelay;
+      }
+    }
+
+    items.push({
+      element: elements[i],
+      props,
+      transition:
+        merged && Object.keys(merged).length ? merged : undefined,
+    });
+  }
+
+  return items;
+}
+
+function animateVariant<TCustom = unknown>(
+  result: SplitTextElements,
+  variant: VariantDefinition<TCustom>,
+  globalTransition: AnimationOptions | undefined,
+  type?: string,
+  isPresent = true,
+  delayScope: DelayScope = "global",
+  custom?: TCustom,
+  forceInstant = false
+): MotionAnimation[] {
+  const instantTransition = { duration: 0, delay: 0 };
+
+  if (typeof variant === "function") {
+    const targetType = getTargetTypeForElements(result, type);
+    const elements = result[targetType];
+    if (!elements.length) return [];
+    const maps = buildIndexMapsDom(result);
+    const items = buildFnItems(
+      elements,
+      targetType,
+      variant,
+      maps,
+      globalTransition,
+      isPresent,
+      delayScope,
+      custom,
+      forceInstant
+    );
+    return items.map((item) =>
+      animate(item.element, item.props, item.transition)
+    );
+  }
+
+  if (isPerTypeVariant(variant)) {
+    const hasFnKey = ELEMENT_TYPE_KEYS.some(
+      (k) => typeof variant[k] === "function"
+    );
+
+    if (hasFnKey) {
+      const maps = buildIndexMapsDom(result);
+      const staticAnimations: MotionAnimation[] = [];
+      const fnAnimations: MotionAnimation[] = [];
+
+      for (const key of ELEMENT_TYPE_KEYS) {
+        const target = variant[key];
+        if (!target || !result[key].length) continue;
+
+        if (typeof target === "function") {
+          const localTransition = variant.transition || globalTransition;
+          const items = buildFnItems(
+            result[key],
+            key,
+            target,
+            maps,
+            localTransition,
+            isPresent,
+            delayScope,
+            custom,
+            forceInstant
+          );
+          fnAnimations.push(
+            ...items.map((item) =>
+              animate(item.element, item.props, item.transition)
+            )
+          );
+        } else {
+          const { props, transition: localT } = extractTransition(target);
+          const t = forceInstant ? instantTransition : localT || globalTransition;
+          staticAnimations.push(animate(result[key], props, t));
+        }
+      }
+
+      return [...staticAnimations, ...fnAnimations];
+    }
+
+    const animations: MotionAnimation[] = [];
+    for (const key of ELEMENT_TYPE_KEYS) {
+      const target = variant[key];
+      if (!target || !result[key].length || typeof target === "function")
+        continue;
+      const { props, transition: localT } = extractTransition(target);
+      const t = forceInstant ? instantTransition : localT || globalTransition;
+      animations.push(animate(result[key], props, t));
+    }
+    return animations;
+  }
+
+  const { props, transition: localT } = extractTransition(variant);
+  const elements = getTargetElements(result, type);
+  if (!elements.length) return [];
+  const t = forceInstant ? instantTransition : localT || globalTransition;
+  return [animate(elements, props, t)];
+}
+
+function animateVariantForScroll<TCustom = unknown>(
+  result: SplitTextElements,
+  variant: VariantDefinition<TCustom>,
+  globalTransition: AnimationOptions | undefined,
+  type?: string,
+  isPresent = true,
+  delayScope: DelayScope = "global",
+  custom?: TCustom,
+  forceInstant = false
+): MotionAnimation | null {
+  const instantTransition = { duration: 0, delay: 0 };
+  const maps = buildIndexMapsDom(result);
+  const items: FnAnimationItem[] = [];
+
+  if (typeof variant === "function") {
+    const targetType = getTargetTypeForElements(result, type);
+    const elements = result[targetType];
+    if (!elements.length) return null;
+    items.push(
+      ...buildFnItems(
+        elements,
+        targetType,
+        variant,
+        maps,
+        globalTransition,
+        isPresent,
+        delayScope,
+        custom,
+        forceInstant
+      )
+    );
+  } else if (isPerTypeVariant(variant)) {
+    for (const key of ELEMENT_TYPE_KEYS) {
+      const target = variant[key];
+      if (!target || !result[key].length) continue;
+
+      if (typeof target === "function") {
+        const localTransition = variant.transition || globalTransition;
+        items.push(
+          ...buildFnItems(
+            result[key],
+            key,
+            target,
+            maps,
+            localTransition,
+            isPresent,
+            delayScope,
+            custom,
+            forceInstant
+          )
+        );
+      } else {
+        const { props, transition: localT } = extractTransition(target);
+        const t = forceInstant ? instantTransition : localT || globalTransition;
+        items.push(
+          ...buildStaticItems(
+            result[key],
+            key,
+            props,
+            t,
+            maps,
+            isPresent,
+            delayScope,
+            custom
+          )
+        );
+      }
+    }
+  } else {
+    const { props, transition: localT } = extractTransition(variant);
+    const targetType = getTargetTypeForElements(result, type);
+    const elements = result[targetType];
+    if (!elements.length) return null;
+    const t = forceInstant ? instantTransition : localT || globalTransition;
+    items.push(
+      ...buildStaticItems(
+        elements,
+        targetType,
+        props,
+        t,
+        maps,
+        isPresent,
+        delayScope,
+        custom
+      )
+    );
+  }
+
+  if (!items.length) return null;
+  return animate(buildSequenceFromItems(items));
+}
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+type ControlledWrapperMotionKeys =
+  | "children"
+  | "className"
+  | "style"
+  | "ref"
+  | "variants"
+  | "initial"
+  | "animate"
+  | "exit"
+  | "whileInView"
+  | "whileHover"
+  | "whileTap"
+  | "whileFocus"
+  | "transition"
+  | "custom"
+  | "onViewportEnter"
+  | "onViewportLeave"
+  | "onRevert"
+  | "onHoverStart"
+  | "onHoverEnd";
+
+type WrapperMotionProps = Omit<
+  HTMLMotionProps<"div">,
+  ControlledWrapperMotionKeys
+>;
+
+interface SplitTextProps<TCustom = unknown> extends WrapperMotionProps {
+  children: ReactElement;
+  /** The wrapper element type. Default: "div" */
+  as?: keyof HTMLElementTagNameMap;
+  /** Class name for the wrapper element */
+  className?: string;
+  /** Additional styles for the wrapper element (merged with internal styles) */
+  style?: React.CSSProperties;
+  /**
+   * Called after text is split.
+   * Return an animation or promise to enable revert (requires revertOnComplete).
+   * Still fires in variant mode for side effects.
+   */
+  onSplit?: (result: SplitTextElements) => AnimationCallbackReturn;
+  /** Called when autoSplit/full-resplit replaces split output elements */
+  onResplit?: (result: SplitTextElements) => void;
+  options?: SplitTextOptions;
+  autoSplit?: boolean;
+  /** When true, autoSplit/full-resplit updates replay initial->animate. */
+  animateOnResplit?: boolean;
+  /** When true, reverts to original HTML after animation promise resolves */
+  revertOnComplete?: boolean;
+  /** Viewport observer options (replaces `inView`). Configures IntersectionObserver. */
+  viewport?: ViewportOptions;
+  /** Called when element enters viewport (replaces `onInView`). Return animation for revertOnComplete support */
+  onViewportEnter?: (result: SplitTextElements) => AnimationCallbackReturn;
+  /** Called when element leaves viewport (replaces `onLeaveView`) */
+  onViewportLeave?: (result: SplitTextElements) => AnimationCallbackReturn;
+  /** Called when split text is reverted (manual or automatic) */
+  onRevert?: () => void;
+  /** Apply initial inline styles to elements after split (and after kerning compensation).
+   * Can be a static style object or a function that receives (element, index). */
+  initialStyles?: InitialStyles;
+  /** Apply initial classes to elements after split (and after kerning compensation).
+   * Classes are added via classList.add() and support space-separated class names. */
+  initialClasses?: InitialClasses;
+  /** Re-apply initialStyles/initialClasses (callback mode) or initial variant (variant mode) when element leaves viewport.
+   * Useful for scroll-triggered animations that should reset when scrolling away. */
+  resetOnViewportLeave?: boolean;
+  /** Wait for `document.fonts.ready` before splitting. Disable for immediate split. */
+  waitForFonts?: boolean;
+
+  // --- Variant props ---
+
+  /** Named variant definitions. Keys are variant names, values are animation targets. */
+  variants?: Record<string, VariantDefinition<TCustom>>;
+  /** Initial variant applied instantly after split (ignores transitions on mount). Set to false to skip. */
+  initial?: string | VariantDefinition<TCustom> | false;
+  /** Variant to animate to immediately after split */
+  animate?: string | VariantDefinition<TCustom>;
+  /** Variant to animate to when entering viewport */
+  whileInView?: string | VariantDefinition<TCustom>;
+  /** Variant to animate to when leaving viewport */
+  whileOutOfView?: string | VariantDefinition<TCustom>;
+  /** Variant to animate to on exit when used inside AnimatePresence.
+   *  Accepts a variant name or a full variant definition. */
+  exit?: string | VariantDefinition<TCustom> | false;
+  /** Variant to scroll-animate to. Animation progress is driven by scroll position.
+   *  Takes priority over `animate` and `whileInView`. */
+  whileScroll?: string | VariantDefinition<TCustom>;
+  /** Scroll options for whileScroll. Configures target tracking and scroll range. */
+  scroll?: ScrollPropOptions;
+  /** Variant to animate to on hover */
+  whileHover?: string | VariantDefinition<TCustom>;
+  /** Variant to animate to on tap */
+  whileTap?: string | VariantDefinition<TCustom>;
+  /** Variant to animate to on focus */
+  whileFocus?: string | VariantDefinition<TCustom>;
+  /** Reduced motion handling (matches MotionConfig reducedMotion) */
+  reducedMotion?: "user" | "always" | "never";
+  /** Custom data forwarded to function variants and AnimatePresence */
+  custom?: TCustom;
+  /** Called when hover starts */
+  onHoverStart?: () => void;
+  /** Called when hover ends */
+  onHoverEnd?: () => void;
+  /** Global transition options for variant animations.
+   *  Precedence: per-element fn return > per-variant transition > this global transition. */
+  transition?: AnimationOptions;
+  /** Controls how delay functions are resolved. "global" uses globalIndex/globalCount, "local" uses index/count. */
+  delayScope?: DelayScope;
+}
+
+function parseStyleValue(styleText: string): React.CSSProperties {
+  const style: React.CSSProperties = {};
+  const parts = styleText.split(";").map((part) => part.trim());
+  for (const part of parts) {
+    if (!part) continue;
+    const [rawKey, ...rawValueParts] = part.split(":");
+    if (!rawKey || rawValueParts.length === 0) continue;
+    const rawValue = rawValueParts.join(":").trim();
+    const key = rawKey.trim();
+    if (key.startsWith("--")) {
+      (style as Record<string, string>)[key] = rawValue;
+      continue;
+    }
+    const camelKey = key.replace(/-([a-z])/g, (_, char: string) =>
+      char.toUpperCase()
+    );
+    (style as Record<string, string>)[camelKey] = rawValue;
+  }
+  return style;
+}
+
+function attrsToProps(attrs: Record<string, string>): Record<string, unknown> {
+  const props: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(attrs)) {
+    if (name === "class") {
+      props.className = value;
+      continue;
+    }
+    if (name === "style") {
+      props.style = parseStyleValue(value);
+      continue;
+    }
+    props[name] = value;
+  }
+  return props;
+}
+
+function buildNodePropsMap(
+  nodes: SplitTextDataNode[]
+): Map<SplitTextDataNode, Record<string, unknown>> {
+  const propsByNode = new Map<SplitTextDataNode, Record<string, unknown>>();
+
+  const walk = (list: SplitTextDataNode[]) => {
+    for (const node of list) {
+      if (node.type !== "element") continue;
+      propsByNode.set(node, attrsToProps(node.attrs));
+      walk(node.children);
+    }
+  };
+
+  walk(nodes);
+
+  return propsByNode;
+}
+
+function serializeInitial(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "function") return value.toString();
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function serializeNode(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(serializeNode).join("");
+  }
+  if (isValidElement(node)) {
+    const elementType = node.type as
+      | string
+      | {
+          displayName?: string;
+          name?: string;
+        };
+    const type =
+      typeof elementType === "string"
+        ? elementType
+        : elementType.displayName || elementType.name || "Component";
+    const props = node.props as Record<string, unknown> | null | undefined;
+    const className =
+      typeof props?.className === "string" ? props.className : "";
+    return `<${type}${className ? `.${className}` : ""}>${serializeNode(
+      (props as { children?: ReactNode } | undefined)?.children
+    )}</${type}>`;
+  }
+  return "";
+}
+
+function buildSplitSignature(
+  child: ReactElement,
+  options: SplitTextOptions | undefined,
+  initialStyles: InitialStyles | undefined,
+  initialClasses: InitialClasses | undefined
+): string {
+  const opt = (options ?? {}) as InternalSplitTextOptions;
+  const signature = {
+    type: opt.type ?? "",
+    charClass: opt.charClass ?? "",
+    wordClass: opt.wordClass ?? "",
+    lineClass: opt.lineClass ?? "",
+    mask: opt.mask ?? "",
+    propIndex: !!opt.propIndex,
+    disableKerning: !!opt.disableKerning,
+    isolateKerningMeasurement: opt.isolateKerningMeasurement !== false,
+    initialStyles: serializeInitial(initialStyles),
+    initialClasses: serializeInitial(initialClasses),
+    child: serializeNode(child),
+  };
+  try {
+    return JSON.stringify(signature);
+  } catch {
+    return String(signature);
+  }
+}
+
+function getMotionComponent(tag: string): React.ElementType {
+  const registry = motion as unknown as Record<string, React.ElementType>;
+  return registry[tag] ?? motion.span;
+}
+
+function collectSplitElements(
+  element: HTMLElement,
+  options?: SplitTextOptions
+): SplitTextElements {
+  const normalizeSelector = (value: string) => {
+    const tokens = value.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return "";
+    return `.${tokens.join(".")}`;
+  };
+
+  const charClass = normalizeSelector(options?.charClass ?? "split-char");
+  const wordClass = normalizeSelector(options?.wordClass ?? "split-word");
+  const lineClass = normalizeSelector(options?.lineClass ?? "split-line");
+
+  const chars = Array.from(
+    element.querySelectorAll<HTMLSpanElement>(charClass)
+  );
+  const words = Array.from(
+    element.querySelectorAll<HTMLSpanElement>(wordClass)
+  );
+  const lines = Array.from(
+    element.querySelectorAll<HTMLSpanElement>(lineClass)
+  );
+
+  return { chars, words, lines, revert: () => {} };
+}
+
+function resolveSplitFlags(type: SplitTextOptions["type"] | undefined): {
+  splitChars: boolean;
+  splitWords: boolean;
+  splitLines: boolean;
+} {
+  const resolvedType = type ?? "chars,words,lines";
+  let splitChars = resolvedType.includes("chars");
+  let splitWords = resolvedType.includes("words");
+  let splitLines = resolvedType.includes("lines");
+
+  if (!splitChars && !splitWords && !splitLines) {
+    splitChars = true;
+    splitWords = true;
+    splitLines = true;
+  }
+
+  return { splitChars, splitWords, splitLines };
+}
+
+function buildSplitDataLayout(data: SplitTextData): SplitDataLayout {
+  const relations = collectRelations(data.nodes);
+  const maps = buildIndexMaps(relations);
+  const propsByNode = buildNodePropsMap(data.nodes);
+
+  return { relations, maps, propsByNode };
+}
+
+function buildVariantInfos<TCustom = unknown>(
+  splitDataLayout: SplitDataLayout | null,
+  isPresent: boolean,
+  custom?: TCustom
+): {
+  charInfos: VariantInfo<TCustom>[];
+  wordInfos: VariantInfo<TCustom>[];
+  lineInfos: VariantInfo<TCustom>[];
+  counts: { chars: number; words: number; lines: number };
+} {
+  if (!splitDataLayout) {
+    return {
+      charInfos: [],
+      wordInfos: [],
+      lineInfos: [],
+      counts: { chars: 0, words: 0, lines: 0 },
+    };
+  }
+
+  const { maps, relations } = splitDataLayout;
+  const { chars, words, lines } = relations.counts;
+
+  const charInfos = new Array(chars)
+    .fill(0)
+    .map((_, index) =>
+      buildVariantInfo("chars", index, chars, maps, isPresent, custom)
+    );
+  const wordInfos = new Array(words)
+    .fill(0)
+    .map((_, index) =>
+      buildVariantInfo("words", index, words, maps, isPresent, custom)
+    );
+  const lineInfos = new Array(lines)
+    .fill(0)
+    .map((_, index) =>
+      buildVariantInfo("lines", index, lines, maps, isPresent, custom)
+    );
+
+  return {
+    charInfos,
+    wordInfos,
+    lineInfos,
+    counts: relations.counts,
+  };
+}
+
+/**
+ * Motion-enabled SplitText component.
+ */
+type SplitTextComponent = <TCustom = unknown>(
+  props: SplitTextProps<TCustom> & RefAttributes<HTMLElement>
+) => ReactElement | null;
+
+export const SplitText = forwardRef(function SplitText<TCustom>(
+  {
+      children,
+      as: Component = "div",
+      className,
+      style: userStyle,
+      onSplit,
+      onResplit,
+      options,
+      autoSplit = false,
+      animateOnResplit = false,
+      revertOnComplete = false,
+      viewport,
+      onViewportEnter,
+      onViewportLeave,
+      onRevert,
+      initialStyles,
+      initialClasses,
+      resetOnViewportLeave = false,
+      waitForFonts = true,
+      variants,
+      initial: initialVariant,
+      animate: animateVariantName,
+      whileInView,
+      whileOutOfView,
+      whileScroll,
+      exit,
+      scroll: scrollProp,
+      whileHover,
+      whileTap,
+      whileFocus,
+      reducedMotion,
+      custom,
+      onHoverStart,
+      onHoverEnd,
+      transition,
+      delayScope = "global",
+      ...wrapperProps
+    }: SplitTextProps<TCustom>,
+  forwardedRef: ForwardedRef<HTMLElement>
+) {
+    const containerRef = useRef<HTMLElement>(null);
+    const [childElement, setChildElement] = useState<HTMLElement | null>(null);
+    const [data, setData] = useState<SplitTextData | null>(null);
+    const [childTreeVersion, setChildTreeVersion] = useState(0);
+    const [isReady, setIsReady] = useState(false);
+    const [isInView, setIsInView] = useState(false);
+    const [isPresent, safeToRemove] = usePresence();
+    const presenceEnabled = typeof safeToRemove === "function";
+    const prefersReducedMotion = useReducedMotion();
+    const reduceMotionActive =
+      reducedMotion === "always" ||
+      (reducedMotion === "user" && !!prefersReducedMotion);
+    const [isHovered, setIsHovered] = useState(false);
+    const [isTapped, setIsTapped] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+
+    // Merge internal ref with forwarded ref
+    const mergedRef = useCallback(
+      (node: HTMLElement | null) => {
+        containerRef.current = node;
+        if (typeof forwardedRef === "function") {
+          forwardedRef(node);
+        } else if (forwardedRef) {
+          forwardedRef.current = node;
+        }
+      },
+      [forwardedRef]
+    );
+
+    const inlineInitialVariant =
+      initialVariant != null &&
+      initialVariant !== false &&
+      typeof initialVariant !== "string";
+    const inlineAnimateVariant =
+      animateVariantName != null && typeof animateVariantName !== "string";
+    const inlineExitVariant =
+      exit != null && exit !== false && typeof exit !== "string";
+    const inlineWhileInViewVariant =
+      whileInView != null && typeof whileInView !== "string";
+    const inlineWhileOutOfViewVariant =
+      whileOutOfView != null && typeof whileOutOfView !== "string";
+    const inlineWhileScrollVariant =
+      whileScroll != null && typeof whileScroll !== "string";
+    const inlineWhileHoverVariant =
+      whileHover != null && typeof whileHover !== "string";
+    const inlineWhileTapVariant =
+      whileTap != null && typeof whileTap !== "string";
+    const inlineWhileFocusVariant =
+      whileFocus != null && typeof whileFocus !== "string";
+    const whileInViewLabel: string | undefined = inlineWhileInViewVariant
+      ? "__griffo_whileInView__"
+      : (whileInView as string | undefined);
+    const whileOutOfViewLabel: string | undefined = inlineWhileOutOfViewVariant
+      ? "__griffo_whileOutOfView__"
+      : (whileOutOfView as string | undefined);
+    const whileScrollLabel: string | undefined = inlineWhileScrollVariant
+      ? "__griffo_whileScroll__"
+      : (whileScroll as string | undefined);
+    const whileHoverLabel: string | undefined = inlineWhileHoverVariant
+      ? "__griffo_whileHover__"
+      : (whileHover as string | undefined);
+    const whileTapLabel: string | undefined = inlineWhileTapVariant
+      ? "__griffo_whileTap__"
+      : (whileTap as string | undefined);
+    const whileFocusLabel: string | undefined = inlineWhileFocusVariant
+      ? "__griffo_whileFocus__"
+      : (whileFocus as string | undefined);
+
+    // Detect whether viewport observer is needed
+    const needsViewport = !!(
+      whileInViewLabel ||
+      whileOutOfViewLabel ||
+      onViewportEnter ||
+      onViewportLeave ||
+      resetOnViewportLeave ||
+      viewport
+    );
+    const viewportAmount = viewport?.amount ?? 0;
+    const viewportLeave = viewport?.leave ?? 0;
+    const viewportMargin = viewport?.margin ?? "0px";
+    const viewportOnce = viewport?.once ?? false;
+    const viewportRoot = viewport?.root?.current ?? null;
+
+    const resolvedVariants = useMemo(() => {
+      if (
+        !variants &&
+        !inlineInitialVariant &&
+        !inlineAnimateVariant &&
+        !inlineExitVariant &&
+        !inlineWhileInViewVariant &&
+        !inlineWhileOutOfViewVariant &&
+        !inlineWhileScrollVariant &&
+        !inlineWhileHoverVariant &&
+        !inlineWhileTapVariant &&
+        !inlineWhileFocusVariant
+      ) {
+        return variants;
+      }
+      const merged: Record<string, VariantDefinition<TCustom>> = {
+        ...(variants ?? {}),
+      };
+      if (inlineInitialVariant) {
+        merged.__griffo_initial__ = initialVariant as VariantDefinition<TCustom>;
+      }
+      if (inlineAnimateVariant) {
+        merged.__griffo_animate__ =
+          animateVariantName as VariantDefinition<TCustom>;
+      }
+      if (inlineExitVariant) {
+        merged.__griffo_exit__ = exit as VariantDefinition<TCustom>;
+      }
+      if (inlineWhileInViewVariant) {
+        merged.__griffo_whileInView__ =
+          whileInView as VariantDefinition<TCustom>;
+      }
+      if (inlineWhileOutOfViewVariant) {
+        merged.__griffo_whileOutOfView__ =
+          whileOutOfView as VariantDefinition<TCustom>;
+      }
+      if (inlineWhileScrollVariant) {
+        merged.__griffo_whileScroll__ =
+          whileScroll as VariantDefinition<TCustom>;
+      }
+      if (inlineWhileHoverVariant) {
+        merged.__griffo_whileHover__ = whileHover as VariantDefinition<TCustom>;
+      }
+      if (inlineWhileTapVariant) {
+        merged.__griffo_whileTap__ = whileTap as VariantDefinition<TCustom>;
+      }
+      if (inlineWhileFocusVariant) {
+        merged.__griffo_whileFocus__ = whileFocus as VariantDefinition<TCustom>;
+      }
+      return merged;
+    }, [
+      variants,
+      inlineInitialVariant,
+      inlineAnimateVariant,
+      inlineExitVariant,
+      inlineWhileInViewVariant,
+      inlineWhileOutOfViewVariant,
+      inlineWhileScrollVariant,
+      inlineWhileHoverVariant,
+      inlineWhileTapVariant,
+      inlineWhileFocusVariant,
+      initialVariant,
+      animateVariantName,
+      exit,
+      whileInView,
+      whileOutOfView,
+      whileScroll,
+      whileHover,
+      whileTap,
+      whileFocus,
+    ]);
+
+    const initialLabel: string | false | undefined = inlineInitialVariant
+      ? "__griffo_initial__"
+      : (initialVariant as string | false | undefined);
+    const animateLabel: string | undefined = inlineAnimateVariant
+      ? "__griffo_animate__"
+      : (animateVariantName as string | undefined);
+    const exitLabel: string | false | undefined = inlineExitVariant
+      ? "__griffo_exit__"
+      : exit;
+    const hasVariants = !!(
+      resolvedVariants && Object.keys(resolvedVariants).length
+    );
+    const hasHover = !!(whileHoverLabel && hasVariants);
+
+    // Stable refs for callbacks and options
+    const onSplitRef = useRef(onSplit);
+    const onResplitRef = useRef(onResplit);
+    const optionsRef = useRef(options);
+    const revertOnCompleteRef = useRef(revertOnComplete);
+    const viewportRef = useRef(viewport);
+    const onViewportEnterRef = useRef(onViewportEnter);
+    const onViewportLeaveRef = useRef(onViewportLeave);
+    const onRevertRef = useRef(onRevert);
+    const initialStylesRef = useRef(initialStyles);
+    const initialClassesRef = useRef(initialClasses);
+    const resetOnViewportLeaveRef = useRef(resetOnViewportLeave);
+    const initialVariantRef = useRef(initialLabel);
+    const whileInViewRef = useRef(whileInViewLabel);
+    const whileOutOfViewRef = useRef(whileOutOfViewLabel);
+
+    useLayoutEffect(() => {
+      onSplitRef.current = onSplit;
+      onResplitRef.current = onResplit;
+      optionsRef.current = options;
+      revertOnCompleteRef.current = revertOnComplete;
+      viewportRef.current = viewport;
+      onViewportEnterRef.current = onViewportEnter;
+      onViewportLeaveRef.current = onViewportLeave;
+      onRevertRef.current = onRevert;
+      initialStylesRef.current = initialStyles;
+      initialClassesRef.current = initialClasses;
+      resetOnViewportLeaveRef.current = resetOnViewportLeave;
+      initialVariantRef.current = initialLabel;
+      whileInViewRef.current = whileInViewLabel;
+      whileOutOfViewRef.current = whileOutOfViewLabel;
+    });
+
+    // Refs for tracking state
+    const hasSplitRef = useRef(false);
+    const hasRevertedRef = useRef(false);
+    const splitResultRef = useRef<SplitTextElements | null>(null);
+    const observerRef = useRef<IntersectionObserver | null>(null);
+    const hasTriggeredOnceRef = useRef(false);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const kerningResizeObserverRef = useRef<ResizeObserver | null>(null);
+    const kerningAnimationFrameRef = useRef<number | null>(null);
+    const removeWindowResizeListenerRef = useRef<(() => void) | null>(null);
+    const lastKerningStyleKeyRef = useRef<string | null>(null);
+    const currentLineFingerprintRef = useRef<string | null>(null);
+    const pendingFullResplitRef = useRef(false);
+    const autoSplitLastChangedTargetRef = useRef<HTMLElement | null>(null);
+    const autoSplitWidthByTargetRef = useRef<Map<HTMLElement, number>>(new Map());
+    const splitResultVersionRef = useRef<number>(-1);
+    const hasRunOnSplitForCycleRef = useRef(false);
+    const originalHTMLRef = useRef<string | null>(null);
+
+    useLayoutEffect(() => {
+      const element = containerRef.current?.firstElementChild;
+      setChildElement(element instanceof HTMLElement ? element : null);
+    }, [children, data]);
+
+    const splitSignature = useMemo(() => {
+      if (!isValidElement(children)) return "";
+      return buildSplitSignature(
+        children,
+        options,
+        initialStyles,
+        initialClasses
+      );
+    }, [children, options, initialStyles, initialClasses]);
+
+    const lastSignatureRef = useRef<string>("");
+    const pendingSignatureRef = useRef<string | null>(null);
+
+    const resetSplitState = useCallback((nextSignature: string) => {
+      hasSplitRef.current = false;
+      hasRevertedRef.current = false;
+      originalHTMLRef.current = null;
+      pendingFullResplitRef.current = false;
+      autoSplitLastChangedTargetRef.current = null;
+      autoSplitWidthByTargetRef.current = new Map();
+      splitResultVersionRef.current = -1;
+      hasRunOnSplitForCycleRef.current = false;
+      lastKerningStyleKeyRef.current = null;
+      currentLineFingerprintRef.current = null;
+      setData(null);
+      setIsReady(false);
+      lastSignatureRef.current = nextSignature;
+    }, []);
+
+    useEffect(() => {
+      if (!splitSignature) return;
+      if (splitSignature === lastSignatureRef.current) return;
+      if (!isPresent) {
+        pendingSignatureRef.current = splitSignature;
+        return;
+      }
+      pendingSignatureRef.current = null;
+      resetSplitState(splitSignature);
+    }, [splitSignature, isPresent, resetSplitState]);
+
+    useEffect(() => {
+      if (!isPresent) return;
+      if (!pendingSignatureRef.current) return;
+      const next = pendingSignatureRef.current;
+      pendingSignatureRef.current = null;
+      resetSplitState(next);
+    }, [isPresent, resetSplitState]);
+
+    const buildSplitDataFromProbe = useCallback((width?: number) => {
+      const currentChild =
+        childElement && childElement.isConnected
+          ? childElement
+          : (() => {
+              const element = containerRef.current?.firstElementChild;
+              return element instanceof HTMLElement ? element : null;
+            })();
+      if (!currentChild) return null;
+      if (!currentChild.parentElement) return null;
+
+      const originalHTML =
+        originalHTMLRef.current ?? currentChild.innerHTML;
+      originalHTMLRef.current = originalHTML;
+      const probeHost = currentChild.ownerDocument.createElement("div");
+      probeHost.setAttribute("data-griffo-auto-split-probe", "true");
+      probeHost.style.position = "fixed";
+      probeHost.style.left = "-99999px";
+      probeHost.style.top = "0";
+      probeHost.style.visibility = "hidden";
+      probeHost.style.pointerEvents = "none";
+      probeHost.style.contain = "layout style paint";
+      const measuredWidth =
+        width ??
+        currentChild.getBoundingClientRect().width;
+      probeHost.style.width = `${Math.max(1, measuredWidth)}px`;
+
+      const probeElement = currentChild.cloneNode(false) as HTMLElement;
+      probeElement.innerHTML = originalHTML;
+      probeHost.appendChild(probeElement);
+      currentChild.parentElement.appendChild(probeHost);
+
+      try {
+        const probeData = splitTextData(probeElement, {
+          ...optionsRef.current,
+          initialStyles: initialStylesRef.current,
+          initialClasses: initialClassesRef.current,
+        });
+        return probeData;
+      } finally {
+        probeHost.remove();
+      }
+    }, [childElement]);
+
+    const measureAndSetData = useCallback(
+      (isResize = false, width?: number) => {
+        // splitTextData mutates the measured node via innerHTML restore semantics.
+        // Measure in an offscreen probe to avoid exposing an intermediate raw-text
+        // frame in the live subtree during responsive/full resplits.
+        const nextData = buildSplitDataFromProbe(width);
+        if (!nextData) return;
+
+        // Bump a key so React remounts the split subtree instead of reconciling
+        // against stale node references captured by callbacks.
+        setChildTreeVersion((current) => current + 1);
+        // Keep content visible after first split to avoid a flash during resplits.
+        if (!isResize) {
+          setIsReady(false);
+        }
+        setData(nextData);
+      },
+      [buildSplitDataFromProbe]
+    );
+
+    const measureLineFingerprintForWidth = useCallback((width: number) => {
+      const probeData = buildSplitDataFromProbe(width);
+      if (!probeData) return null;
+      return buildLineFingerprintFromData(probeData);
+    }, [buildSplitDataFromProbe]);
+
+    const resolveLineMeasureWidth = useCallback((fallbackWidth: number) => {
+      const safeFallbackWidth =
+        Number.isFinite(fallbackWidth) && fallbackWidth > 0
+          ? fallbackWidth
+          : 1;
+      const observedChild = containerRef.current?.firstElementChild;
+      if (observedChild instanceof HTMLElement) {
+        const childWidth = observedChild.getBoundingClientRect().width;
+        if (Number.isFinite(childWidth) && childWidth > 0) {
+          // In responsive demos the split child can remain visually constrained by
+          // previously generated line wrappers after growth. When that happens,
+          // fallback container width is a better proxy for expected reflow.
+          return Math.max(childWidth, safeFallbackWidth);
+        }
+      }
+      return safeFallbackWidth;
+    }, []);
+
+    const lockCurrentRenderedLines = useCallback((root: HTMLElement) => {
+      const lineClass = optionsRef.current?.lineClass ?? "split-line";
+      const classTokens = lineClass.split(/\s+/).filter(Boolean);
+      if (classTokens.length === 0) return;
+      const selector = `.${classTokens.join(".")}`;
+      root.querySelectorAll<HTMLElement>(selector).forEach((line) => {
+        line.style.whiteSpace = "nowrap";
+      });
+    }, []);
+
+    // Initial split
+    useEffect(() => {
+      if (!childElement) return;
+      if (hasSplitRef.current) return;
+
+      let isMounted = true;
+
+      waitForFontsReady(waitForFonts).then(() => {
+        if (!isMounted || hasSplitRef.current) return;
+        if (!containerRef.current) return;
+
+        measureAndSetData();
+        hasSplitRef.current = true;
+      });
+
+      return () => {
+        isMounted = false;
+      };
+    }, [childElement, measureAndSetData, waitForFonts]);
+
+    const splitDataLayout = useMemo(
+      () => (data ? buildSplitDataLayout(data) : null),
+      [data]
+    );
+
+    useEffect(() => {
+      if (!data) {
+        currentLineFingerprintRef.current = null;
+        return;
+      }
+      const { splitLines } = resolveSplitFlags(optionsRef.current?.type);
+      currentLineFingerprintRef.current = splitLines
+        ? buildLineFingerprintFromData(data)
+        : null;
+    }, [data]);
+
+    // Build VariantInfo arrays for function variants
+    const variantInfo = useMemo(
+      () => buildVariantInfos(splitDataLayout, isPresent, custom),
+      [splitDataLayout, isPresent, custom]
+    );
+
+    const targetType = useMemo(() => {
+      if (!data) return "words";
+      return getTargetType(data, options?.type);
+    }, [data, options]);
+
+    const orchestrationTransition = useMemo(
+      () => pickOrchestration(transition),
+      [transition]
+    );
+
+    const hasOrchestrationVariants = useMemo(() => {
+      if (hasOrchestration(transition)) return true;
+      if (!resolvedVariants) return false;
+      for (const def of Object.values(resolvedVariants)) {
+        if (hasOrchestration(getVariantTransition(def))) return true;
+      }
+      return false;
+    }, [transition, resolvedVariants]);
+
+    const childDefaultTransition = useMemo(() => {
+      if (reduceMotionActive) {
+        return { duration: 0, delay: 0 };
+      }
+      return stripOrchestration(transition);
+    }, [transition, reduceMotionActive]);
+
+    const { types: variantsByType, wrapper: wrapperVariantsByName } = useMemo(
+      () =>
+        buildVariantsByType(
+          resolvedVariants,
+          targetType,
+          childDefaultTransition,
+          delayScope,
+          reduceMotionActive
+        ),
+      [
+        resolvedVariants,
+        targetType,
+        childDefaultTransition,
+        delayScope,
+        reduceMotionActive,
+      ]
+    );
+    const nodePropsMap = splitDataLayout?.propsByNode;
+
+    const exitTypes = useMemo(() => {
+      const exitKey = typeof exitLabel === "string" ? exitLabel : null;
+      if (!exitKey) return [] as SplitTypeKey[];
+      const types: SplitTypeKey[] = [];
+      for (const key of ELEMENT_TYPE_KEYS) {
+        const defs = (variantsByType as Partial<
+          Record<SplitTypeKey, Record<string, PerTypeVariant<TCustom>>>
+        >)[key];
+        if (defs && exitKey in defs) {
+          types.push(key);
+        }
+      }
+      return types;
+    }, [variantsByType, exitLabel]);
+
+    const revertTypes = useMemo(() => {
+      const animateKey = typeof animateLabel === "string" ? animateLabel : null;
+      if (!animateKey) return [] as SplitTypeKey[];
+      const types: SplitTypeKey[] = [];
+      for (const key of ELEMENT_TYPE_KEYS) {
+      const defs = (variantsByType as Partial<
+          Record<SplitTypeKey, Record<string, PerTypeVariant<TCustom>>>
+        >)[key];
+        if (defs && animateKey in defs) {
+          types.push(key);
+        }
+      }
+      return types;
+    }, [variantsByType, animateLabel]);
+
+    const exitTotalCount = useMemo(() => {
+      return exitTypes.reduce((sum, type) => {
+        const count = variantInfo.counts[type] ?? 0;
+        return sum + count;
+      }, 0);
+    }, [exitTypes, variantInfo.counts]);
+
+    const revertTotalCount = useMemo(() => {
+      return revertTypes.reduce((sum, type) => {
+        const count = variantInfo.counts[type] ?? 0;
+        return sum + count;
+      }, 0);
+    }, [revertTypes, variantInfo.counts]);
+
+    const parentVariants = useMemo(() => {
+      if (!resolvedVariants) return undefined;
+      const entries = Object.keys(resolvedVariants);
+      if (entries.length === 0) return undefined;
+      const result: Record<string, VariantTarget> = {};
+      for (const key of entries) {
+        const wrapperVariant = wrapperVariantsByName[key];
+        const def = resolvedVariants[key];
+        const localOrchestration = pickOrchestration(
+          getVariantTransition(def)
+        );
+        const wrapperBaseTransition = reduceMotionActive
+          ? { duration: 0, delay: 0 }
+          : stripOrchestration(transition);
+        const applyWrapperTransition = (target: VariantTarget) => {
+          if (!wrapperBaseTransition) return target;
+          if (target.transition) {
+            return {
+              ...target,
+              transition: { ...wrapperBaseTransition, ...target.transition },
+            };
+          }
+          return { ...target, transition: wrapperBaseTransition };
+        };
+        if (wrapperVariant) {
+          if (typeof wrapperVariant === "function") {
+            const resolved = wrapperVariant({ custom });
+            result[key] = reduceMotionActive
+              ? { ...resolved, transition: { duration: 0, delay: 0 } }
+              : applyWrapperTransition(resolved);
+          } else {
+            const resolved = reduceMotionActive
+              ? { ...wrapperVariant, transition: { duration: 0, delay: 0 } }
+              : wrapperVariant;
+            result[key] = applyWrapperTransition(resolved);
+          }
+          continue;
+        }
+        const transitionValue = reduceMotionActive
+          ? { duration: 0, delay: 0 }
+          : orchestrationTransition || localOrchestration
+            ? {
+                ...(orchestrationTransition ?? {}),
+                ...(localOrchestration ?? {}),
+              }
+            : undefined;
+        result[key] = transitionValue ? { transition: transitionValue } : {};
+      }
+      return result;
+    }, [
+      resolvedVariants,
+      orchestrationTransition,
+      reduceMotionActive,
+      wrapperVariantsByName,
+      custom,
+      transition,
+    ]);
+    const hasWrapperExitVariant =
+      typeof exitLabel === "string" && !!wrapperVariantsByName[exitLabel];
+    const trackedExitCount =
+      exitTotalCount + (hasWrapperExitVariant ? 1 : 0);
+
+    const [activeVariant, setActiveVariant] = useState<string | undefined>(
+      animateLabel
+    );
+
+    useEffect(() => {
+      if (!hasHover) {
+        setIsHovered(false);
+      }
+    }, [hasHover]);
+
+    const hasTap = !!(whileTapLabel && hasVariants);
+    const hasFocus = !!(whileFocusLabel && hasVariants);
+    const {
+      onTapStart: userOnTapStart,
+      onTapCancel: userOnTapCancel,
+      onTap: userOnTap,
+      onFocus: userOnFocus,
+      onBlur: userOnBlur,
+      onAnimationComplete: userOnAnimationComplete,
+      ...passthroughWrapperProps
+    } = wrapperProps;
+
+    useEffect(() => {
+      if (!hasTap) {
+        setIsTapped(false);
+      }
+    }, [hasTap]);
+
+    useEffect(() => {
+      if (!hasFocus) {
+        setIsFocused(false);
+      }
+    }, [hasFocus]);
+
+    const exitTrackerRef = useRef({
+      isPresent: true,
+      total: 0,
+      completed: 0,
+      session: 0,
+    });
+    const revertTrackerRef = useRef({
+      total: 0,
+      completed: 0,
+    });
+
+    useEffect(() => {
+      exitTrackerRef.current.isPresent = isPresent;
+    }, [isPresent]);
+
+    useEffect(() => {
+      if (!presenceEnabled) return;
+      const tracker = exitTrackerRef.current;
+      tracker.session += 1;
+      tracker.completed = 0;
+      tracker.total = trackedExitCount;
+
+      if (isPresent) return;
+      if (!exitLabel || trackedExitCount === 0) {
+        safeToRemove?.();
+      }
+    }, [
+      presenceEnabled,
+      isPresent,
+      exitLabel,
+      trackedExitCount,
+      safeToRemove,
+    ]);
+
+    const handleExitComplete = useCallback(
+      (definition?: string | VariantTarget) => {
+        if (!presenceEnabled) return;
+        const tracker = exitTrackerRef.current;
+        if (tracker.isPresent) return;
+        if (typeof exitLabel !== "string") return;
+        if (definition !== exitLabel) return;
+        tracker.completed += 1;
+        if (tracker.completed >= tracker.total) {
+          safeToRemove?.();
+        }
+      },
+      [presenceEnabled, exitLabel, safeToRemove]
+    );
+
+    const handleHoverStart = useCallback(() => {
+      if (hasHover) {
+        setIsHovered(true);
+      }
+      onHoverStart?.();
+    }, [hasHover, onHoverStart]);
+
+    const handleHoverEnd = useCallback(() => {
+      if (hasHover) {
+        setIsHovered(false);
+      }
+      onHoverEnd?.();
+    }, [hasHover, onHoverEnd]);
+
+    const handleTapStart = useCallback((...args: unknown[]) => {
+      if (hasTap) {
+        setIsTapped(true);
+      }
+      if (typeof userOnTapStart === "function") {
+        (userOnTapStart as (...callbackArgs: unknown[]) => void)(...args);
+      }
+    }, [hasTap, userOnTapStart]);
+
+    const handleTapCancel = useCallback((...args: unknown[]) => {
+      if (hasTap) {
+        setIsTapped(false);
+      }
+      if (typeof userOnTapCancel === "function") {
+        (userOnTapCancel as (...callbackArgs: unknown[]) => void)(...args);
+      }
+    }, [hasTap, userOnTapCancel]);
+
+    const handleTapEnd = useCallback((...args: unknown[]) => {
+      if (hasTap) {
+        setIsTapped(false);
+      }
+      if (typeof userOnTap === "function") {
+        (userOnTap as (...callbackArgs: unknown[]) => void)(...args);
+      }
+    }, [hasTap, userOnTap]);
+
+    const handleFocus = useCallback((...args: unknown[]) => {
+      if (hasFocus) {
+        setIsFocused(true);
+      }
+      if (typeof userOnFocus === "function") {
+        (userOnFocus as (...callbackArgs: unknown[]) => void)(...args);
+      }
+    }, [hasFocus, userOnFocus]);
+
+    const handleBlur = useCallback((...args: unknown[]) => {
+      if (hasFocus) {
+        setIsFocused(false);
+      }
+      if (typeof userOnBlur === "function") {
+        (userOnBlur as (...callbackArgs: unknown[]) => void)(...args);
+      }
+    }, [hasFocus, userOnBlur]);
+    const handleWrapperAnimationComplete = useCallback(
+      (definition: unknown) => {
+        const exitDefinition =
+          typeof definition === "string" ||
+          (typeof definition === "object" && definition !== null)
+            ? (definition as string | VariantTarget)
+            : undefined;
+        if (hasWrapperExitVariant) {
+          handleExitComplete(exitDefinition);
+        }
+        if (typeof userOnAnimationComplete === "function") {
+          (userOnAnimationComplete as (value: unknown) => void)(definition);
+        }
+      },
+      [hasWrapperExitVariant, handleExitComplete, userOnAnimationComplete]
+    );
+
+    useEffect(() => {
+      if (!hasVariants) return;
+      if (!resolvedVariants) return;
+
+      if (!isPresent) return;
+
+      if (whileScrollLabel) return;
+
+      const vDefs = resolvedVariants;
+      if (isInView) {
+        const inViewName = whileInViewRef.current;
+        if (inViewName && vDefs[inViewName]) {
+          setActiveVariant(inViewName);
+          return;
+        }
+      } else {
+        const outName = whileOutOfViewRef.current;
+        if (outName && vDefs[outName] && hasTriggeredOnceRef.current) {
+          setActiveVariant(outName);
+          return;
+        }
+
+        if (!viewportRef.current?.once && resetOnViewportLeaveRef.current) {
+          const initName = initialVariantRef.current;
+          if (initName && typeof initName === "string" && vDefs[initName]) {
+            setActiveVariant(initName);
+            return;
+          }
+        }
+      }
+
+      const animateName = animateLabel;
+      if (animateName && vDefs[animateName]) {
+        setActiveVariant(animateName);
+      }
+    }, [
+      isInView,
+      hasVariants,
+      resolvedVariants,
+      animateLabel,
+      whileScrollLabel,
+      isPresent,
+    ]);
+
+    useEffect(() => {
+      if (!data || !childElement) return;
+      const liveChildElement = containerRef.current?.firstElementChild;
+      if (!(liveChildElement instanceof HTMLElement)) return;
+
+      const splitElements = collectSplitElements(liveChildElement, optionsRef.current);
+      const expectedCounts = splitDataLayout?.relations.counts ?? {
+        chars: 0,
+        words: 0,
+        lines: 0,
+      };
+      const missingExpectedElements =
+        (expectedCounts.chars > 0 && splitElements.chars.length === 0) ||
+        (expectedCounts.words > 0 && splitElements.words.length === 0) ||
+        (expectedCounts.lines > 0 && splitElements.lines.length === 0);
+
+      // During re-split/remount there can be one transient pass where `data`
+      // is ready but `childElement` still points at the pre-split subtree.
+      // Skip this stale pass so onSplit only receives real split nodes.
+      if (missingExpectedElements) {
+        return;
+      }
+
+      const revert = () => {
+        if (hasRevertedRef.current) return;
+        hasRevertedRef.current = true;
+        try {
+          onRevertRef.current?.();
+        } finally {
+          // Do not mutate childElement.innerHTML here.
+          // React owns this subtree; imperative DOM replacement can desync
+          // reconciliation and cause NotFoundError on unmount/removal.
+          setData(null);
+          setIsReady(true);
+        }
+      };
+
+      splitResultRef.current = { ...splitElements, revert };
+      splitResultVersionRef.current = childTreeVersion;
+
+      if (pendingFullResplitRef.current) {
+        if (onResplitRef.current) {
+          queueMicrotask(() => {
+            const currentChild = containerRef.current?.firstElementChild;
+            if (!(currentChild instanceof HTMLElement)) return;
+            const currentSplitElements = collectSplitElements(
+              currentChild,
+              optionsRef.current
+            );
+            onResplitRef.current?.({
+              chars: currentSplitElements.chars,
+              words: currentSplitElements.words,
+              lines: currentSplitElements.lines,
+              revert,
+            });
+          });
+        }
+        pendingFullResplitRef.current = false;
+      }
+
+      // Match core/react callback ordering: reveal before runtime wiring callbacks.
+      if (waitForFonts && containerRef.current) {
+        containerRef.current.style.visibility = "visible";
+      }
+      setIsReady(true);
+
+      if (!hasRunOnSplitForCycleRef.current && onSplitRef.current) {
+        hasRunOnSplitForCycleRef.current = true;
+        const callbackResult = onSplitRef.current(splitResultRef.current);
+        const shouldRevert =
+          !hasVariants && !needsViewport && revertOnCompleteRef.current;
+        if (shouldRevert) {
+          const promise = normalizeToPromise(callbackResult);
+          if (promise) {
+            promise
+              .then(() => {
+                if (hasRevertedRef.current) return;
+                splitResultRef.current?.revert();
+              })
+              .catch(() => {
+                console.warn("[griffo] Animation rejected, text not reverted");
+              });
+          } else if (callbackResult !== undefined) {
+            console.warn(
+              "SplitText: revertOnComplete is enabled but onSplit did not return an animation or promise."
+            );
+          }
+        }
+      }
+
+      return undefined;
+    }, [data, childElement, needsViewport, hasVariants, splitDataLayout, childTreeVersion]);
+
+    useEffect(() => {
+      if (!data) return;
+
+      const observedElement = containerRef.current?.firstElementChild;
+      if (!(observedElement instanceof HTMLElement)) return;
+
+      const { splitChars, splitWords, splitLines } = resolveSplitFlags(
+        optionsRef.current?.type
+      );
+      const supportsKerningUpkeep =
+        !optionsRef.current?.disableKerning && (splitChars || splitWords);
+      if (!supportsKerningUpkeep) return;
+
+      const ownerWindow = observedElement.ownerDocument.defaultView;
+      const wordClass = optionsRef.current?.wordClass ?? "split-word";
+      const charClass = optionsRef.current?.charClass ?? "split-char";
+      const mask = optionsRef.current?.mask;
+      const isolateKerningMeasurement =
+        (optionsRef.current as InternalSplitTextOptions | undefined)
+          ?.isolateKerningMeasurement;
+      const readKerningStyleSnapshot = (element: HTMLElement) =>
+        `${buildKerningStyleKey(getComputedStyle(element))}|${
+          element.getAttribute("style") ?? ""
+        }`;
+
+      lastKerningStyleKeyRef.current = readKerningStyleSnapshot(observedElement);
+
+      const runKerningUpkeep = () => {
+        const currentElement = containerRef.current?.firstElementChild;
+        if (!(currentElement instanceof HTMLElement)) return;
+        if (!currentElement.isConnected) return;
+
+        const nextKerningStyleKey = readKerningStyleSnapshot(currentElement);
+        if (nextKerningStyleKey === lastKerningStyleKeyRef.current) return;
+        lastKerningStyleKeyRef.current = nextKerningStyleKey;
+
+        if (splitLines) {
+          if (!autoSplit || pendingFullResplitRef.current) return;
+          // Typography-driven line changes should not wait behind width debounce.
+          if (resizeTimerRef.current) {
+            clearTimeout(resizeTimerRef.current);
+            resizeTimerRef.current = null;
+          }
+          lockCurrentRenderedLines(currentElement);
+          pendingFullResplitRef.current = true;
+          let resplitWidth: number | undefined;
+          const targets = resolveAutoSplitTargets(currentElement);
+          if (targets.length > 0) {
+            const fallbackWidth = resolveAutoSplitWidth(
+              targets,
+              autoSplitWidthByTargetRef.current,
+              autoSplitLastChangedTargetRef.current
+            );
+            resplitWidth = resolveLineMeasureWidth(fallbackWidth);
+          }
+          measureAndSetData(true, resplitWidth);
+          return;
+        }
+
+        const wordsForKerning = querySplitWords(currentElement, wordClass);
+        if (wordsForKerning.length === 0) return;
+
+        clearKerningCompensation(
+          wordsForKerning,
+          charClass,
+          splitChars,
+          splitWords,
+          mask
+        );
+
+        applyKerningCompensation(
+          currentElement,
+          wordsForKerning,
+          charClass,
+          splitChars,
+          splitWords,
+          {
+            disableKerning: optionsRef.current?.disableKerning,
+            isolateKerningMeasurement,
+            mask,
+          }
+        );
+      };
+
+      const scheduleKerningUpkeep = () => {
+        // In line mode we need to apply immediately to avoid a visible
+        // intermediate frame where font metrics changed but lines did not.
+        if (splitLines) {
+          runKerningUpkeep();
+          return;
+        }
+        if (kerningAnimationFrameRef.current !== null) return;
+        if (!ownerWindow) {
+          runKerningUpkeep();
+          return;
+        }
+        kerningAnimationFrameRef.current = ownerWindow.requestAnimationFrame(
+          () => {
+            kerningAnimationFrameRef.current = null;
+            runKerningUpkeep();
+          }
+        );
+      };
+
+      kerningResizeObserverRef.current = new ResizeObserver(() => {
+        scheduleKerningUpkeep();
+      });
+      kerningResizeObserverRef.current.observe(observedElement);
+
+      if (ownerWindow) {
+        ownerWindow.addEventListener("resize", scheduleKerningUpkeep);
+        removeWindowResizeListenerRef.current = () => {
+          ownerWindow.removeEventListener("resize", scheduleKerningUpkeep);
+        };
+      }
+
+      return () => {
+        if (kerningResizeObserverRef.current) {
+          kerningResizeObserverRef.current.disconnect();
+          kerningResizeObserverRef.current = null;
+        }
+        if (kerningAnimationFrameRef.current !== null && ownerWindow) {
+          ownerWindow.cancelAnimationFrame(kerningAnimationFrameRef.current);
+          kerningAnimationFrameRef.current = null;
+        }
+        if (removeWindowResizeListenerRef.current) {
+          removeWindowResizeListenerRef.current();
+          removeWindowResizeListenerRef.current = null;
+        }
+      };
+    }, [
+      autoSplit,
+      childTreeVersion,
+      data,
+      lockCurrentRenderedLines,
+      measureAndSetData,
+      resolveLineMeasureWidth,
+    ]);
+
+    useEffect(() => {
+      if (!needsViewport) {
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+          observerRef.current = null;
+        }
+        return;
+      }
+      if (!containerRef.current) return;
+      if (!data) return;
+
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+
+      observerRef.current = createViewportObserver(
+        viewportRef.current,
+        hasTriggeredOnceRef,
+        () => setIsInView(true),
+        () => setIsInView(false)
+      );
+      observerRef.current.observe(containerRef.current);
+
+      return () => {
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+          observerRef.current = null;
+        }
+      };
+    }, [
+      data,
+      needsViewport,
+      viewportAmount,
+      viewportLeave,
+      viewportMargin,
+      viewportOnce,
+      viewportRoot,
+    ]);
+
+    const shouldRevertOnComplete =
+      hasVariants &&
+      !!animateLabel &&
+      !whileInViewLabel &&
+      !needsViewport &&
+      !whileScrollLabel &&
+      revertOnComplete;
+
+    const pendingRevertRef = useRef<string | null>(null);
+    useEffect(() => {
+      if (!shouldRevertOnComplete) {
+        pendingRevertRef.current = null;
+        revertTrackerRef.current.total = 0;
+        revertTrackerRef.current.completed = 0;
+        return;
+      }
+      pendingRevertRef.current = animateLabel ?? null;
+      const tracker = revertTrackerRef.current;
+      tracker.total = revertTotalCount;
+      tracker.completed = 0;
+
+      if (revertTotalCount === 0) {
+        splitResultRef.current?.revert();
+        pendingRevertRef.current = null;
+      }
+    }, [shouldRevertOnComplete, animateLabel, revertTotalCount]);
+
+    const handleRevertComplete = useCallback(
+      (definition?: string | VariantTarget) => {
+        const label = pendingRevertRef.current;
+        if (!label) return;
+        if (typeof definition === "string" && definition !== label) {
+          return;
+        }
+        const tracker = revertTrackerRef.current;
+        tracker.completed += 1;
+        if (tracker.completed >= tracker.total) {
+          splitResultRef.current?.revert();
+          pendingRevertRef.current = null;
+        }
+      },
+      []
+    );
+
+    useEffect(() => {
+      if (!autoSplit || !containerRef.current) return;
+      if (!data) return;
+
+      const child = containerRef.current.firstElementChild;
+      if (!(child instanceof HTMLElement)) return;
+
+      const targets = resolveAutoSplitTargets(child);
+      if (targets.length === 0) return;
+
+      autoSplitWidthByTargetRef.current = new Map();
+      const { splitLines } = resolveSplitFlags(optionsRef.current?.type);
+
+      const handleResize = () => {
+        const currentWidth = resolveAutoSplitWidth(
+          targets,
+          autoSplitWidthByTargetRef.current,
+          autoSplitLastChangedTargetRef.current
+        );
+        autoSplitLastChangedTargetRef.current = null;
+        const lineMeasureWidth = resolveLineMeasureWidth(currentWidth);
+
+        if (splitLines && currentLineFingerprintRef.current !== null) {
+          const nextFingerprint = measureLineFingerprintForWidth(
+            lineMeasureWidth
+          );
+          if (
+            nextFingerprint !== null &&
+            nextFingerprint === currentLineFingerprintRef.current
+          ) {
+            return;
+          }
+        }
+
+        if (resizeTimerRef.current) {
+          clearTimeout(resizeTimerRef.current);
+          resizeTimerRef.current = null;
+        }
+        const debounceMs = resolveResplitDebounceMs(
+          optionsRef.current?.resplitDebounceMs
+        );
+        if (debounceMs <= 0) {
+          lockCurrentRenderedLines(child);
+          pendingFullResplitRef.current = true;
+          measureAndSetData(
+            true,
+            splitLines ? lineMeasureWidth : currentWidth
+          );
+          return;
+        }
+        resizeTimerRef.current = setTimeout(() => {
+          lockCurrentRenderedLines(child);
+          pendingFullResplitRef.current = true;
+          measureAndSetData(
+            true,
+            splitLines ? lineMeasureWidth : currentWidth
+          );
+        }, debounceMs);
+      };
+
+      resizeObserverRef.current = new ResizeObserver((entries) => {
+        let changed = false;
+        let changedTarget: HTMLElement | null = null;
+
+        entries.forEach((entry) => {
+          if (!(entry.target instanceof HTMLElement)) return;
+          const nextWidth = getObservedWidth(entry, entry.target);
+          if (nextWidth === null) return;
+          const didChange = recordWidthChange(
+            autoSplitWidthByTargetRef.current,
+            entry.target,
+            nextWidth
+          );
+          if (didChange) {
+            changed = true;
+            changedTarget = entry.target;
+          }
+        });
+
+        if (!changed) return;
+        autoSplitLastChangedTargetRef.current = changedTarget;
+        handleResize();
+      });
+
+      targets.forEach((target) => {
+        resizeObserverRef.current!.observe(target);
+      });
+
+      return () => {
+        if (resizeObserverRef.current) {
+          resizeObserverRef.current.disconnect();
+          resizeObserverRef.current = null;
+        }
+        autoSplitLastChangedTargetRef.current = null;
+        autoSplitWidthByTargetRef.current = new Map();
+        if (resizeTimerRef.current) {
+          clearTimeout(resizeTimerRef.current);
+          resizeTimerRef.current = null;
+        }
+      };
+    }, [
+      autoSplit,
+      data,
+      lockCurrentRenderedLines,
+      measureAndSetData,
+      measureLineFingerprintForWidth,
+      resolveLineMeasureWidth,
+    ]);
+
+    useEffect(() => {
+      if (!splitResultRef.current) return;
+      if (!needsViewport) return;
+
+      if (isInView && onViewportEnterRef.current) {
+        const callbackResult = onViewportEnterRef.current(
+          splitResultRef.current
+        );
+        const promise = normalizeToPromise(callbackResult);
+
+        if (revertOnCompleteRef.current && promise) {
+          promise
+            .then(() => {
+              splitResultRef.current?.revert();
+            })
+            .catch(() => {
+              console.warn("[griffo] Animation rejected, text not reverted");
+            });
+        }
+        return;
+      }
+
+      if (!isInView) {
+        if (!hasVariants && resetOnViewportLeaveRef.current) {
+          const { chars, words, lines } = splitResultRef.current;
+          const styles = initialStylesRef.current;
+          const classes = initialClassesRef.current;
+
+          if (styles) {
+            reapplyInitialStyles(chars, styles.chars);
+            reapplyInitialStyles(words, styles.words);
+            reapplyInitialStyles(lines, styles.lines);
+          }
+
+          if (classes) {
+            reapplyInitialClasses(chars, classes.chars);
+            reapplyInitialClasses(words, classes.words);
+            reapplyInitialClasses(lines, classes.lines);
+          }
+        }
+
+        if (onViewportLeaveRef.current) {
+          onViewportLeaveRef.current(splitResultRef.current);
+        }
+      }
+    }, [isInView, needsViewport, hasVariants]);
+
+    useEffect(() => {
+      if (!whileScrollLabel) return;
+      if (!resolvedVariants) return;
+      if (!splitResultRef.current) return;
+      if (splitResultVersionRef.current !== childTreeVersion) return;
+      const liveChildElement = containerRef.current?.firstElementChild;
+      if (!(liveChildElement instanceof HTMLElement)) return;
+
+      const variantName = whileScrollLabel;
+      const def = resolvedVariants[variantName];
+      if (!def) return;
+
+      if (reduceMotionActive) {
+        animateVariant(
+          splitResultRef.current,
+          def,
+          { duration: 0, delay: 0 },
+          optionsRef.current?.type,
+          isPresent,
+          delayScope,
+          custom,
+          true
+        );
+        return;
+      }
+
+      const scrollAnimation = animateVariantForScroll(
+        splitResultRef.current,
+        def,
+        transition,
+        optionsRef.current?.type,
+        isPresent,
+        delayScope,
+        custom
+      );
+
+      if (!scrollAnimation) return;
+
+      const scrollOpts = scrollProp;
+      const cleanup = scroll(scrollAnimation, {
+        target: containerRef.current ?? undefined,
+        offset: scrollOpts?.offset,
+        axis: scrollOpts?.axis,
+        container: scrollOpts?.container?.current ?? undefined,
+      });
+
+      return () => {
+        cleanup();
+      };
+    }, [
+      data,
+      childElement,
+      isPresent,
+      whileScrollLabel,
+      resolvedVariants,
+      transition,
+      scrollProp,
+      delayScope,
+      reduceMotionActive,
+      custom,
+      childTreeVersion,
+    ]);
+
+    if (!isValidElement(children)) {
+      console.error("SplitText: children must be a single valid React element");
+      return null;
+    }
+
+    const counters = { char: 0, word: 0, line: 0 };
+    const exitProp = exitLabel === false ? undefined : exitLabel;
+    const hoverVariant = hasHover ? whileHoverLabel : undefined;
+    const tapVariant = hasTap ? whileTapLabel : undefined;
+    const focusVariant = hasFocus ? whileFocusLabel : undefined;
+    const hasWrapperVariants = Object.keys(wrapperVariantsByName).length > 0;
+    const interactionVariant =
+      (isTapped && tapVariant) ||
+      (isFocused && focusVariant) ||
+      (isHovered && hoverVariant) ||
+      undefined;
+    const displayVariant = interactionVariant ?? activeVariant;
+    const shouldInheritVariants =
+      hasOrchestrationVariants ||
+      !!whileScrollLabel ||
+      hasHover ||
+      hasTap ||
+      hasFocus ||
+      hasWrapperVariants;
+    const suppressInitialOnResplit =
+      !animateOnResplit && pendingFullResplitRef.current;
+    const childInitial =
+      suppressInitialOnResplit
+        ? false
+        : shouldInheritVariants || initialLabel === undefined
+        ? undefined
+        : initialLabel;
+    const childAnimate =
+      shouldInheritVariants || !hasVariants || !isReady
+        ? undefined
+        : displayVariant;
+    const wrapperVariants = shouldInheritVariants ? parentVariants : undefined;
+    const wrapperInitial =
+      suppressInitialOnResplit
+        ? false
+        : shouldInheritVariants && initialLabel !== undefined
+        ? initialLabel
+        : undefined;
+    const wrapperAnimate =
+      shouldInheritVariants && hasVariants && isReady
+        ? displayVariant
+        : undefined;
+    const wrapperExit = shouldInheritVariants ? exitProp : undefined;
+    const wrapperTransition =
+      shouldInheritVariants && hasVariants
+        ? reduceMotionActive
+          ? { duration: 0, delay: 0 }
+          : orchestrationTransition
+        : undefined;
+
+    function renderNode(node: SplitTextDataNode, key: string): ReactNode {
+      if (node.type === "text") {
+        return node.text;
+      }
+
+      const props = nodePropsMap?.get(node) ?? attrsToProps(node.attrs);
+      const renderedChildren = renderNodes(node.children, key);
+      const isVoidTag = VOID_HTML_TAGS.has(node.tag);
+
+      if (node.split) {
+        const splitType = node.split === "char"
+          ? "chars"
+          : node.split === "word"
+            ? "words"
+            : "lines";
+        const isChar = splitType === "chars";
+        const isWord = splitType === "words";
+        const index = isChar
+          ? counters.char++
+          : isWord
+            ? counters.word++
+            : counters.line++;
+        const info = isChar
+          ? variantInfo.charInfos[index]
+          : isWord
+            ? variantInfo.wordInfos[index]
+            : variantInfo.lineInfos[index];
+        const renderAsMotionSplitNode = hasVariants;
+        if (!renderAsMotionSplitNode) {
+          if (isVoidTag) {
+            return createElement(node.tag, { key, ...props });
+          }
+          return createElement(node.tag, { key, ...props }, renderedChildren);
+        }
+
+        const MotionTag = getMotionComponent(node.tag);
+        const variantsForType = (variantsByType as Record<string, unknown>)[
+          splitType
+        ] as Record<string, PerTypeVariant<TCustom>> | undefined;
+        const needsExitTracking =
+          presenceEnabled &&
+          typeof exitLabel === "string" &&
+          variantsForType &&
+          exitLabel in variantsForType;
+        const animateKey = typeof animateLabel === "string" ? animateLabel : null;
+        const needsRevertTracking =
+          shouldRevertOnComplete &&
+          !!animateKey &&
+          variantsForType &&
+          animateKey in variantsForType;
+        const onCompleteHandler =
+          needsExitTracking || needsRevertTracking
+            ? (definition?: string | VariantTarget) => {
+                if (needsExitTracking) {
+                  handleExitComplete(definition);
+                }
+                if (needsRevertTracking) {
+                  handleRevertComplete(definition);
+                }
+              }
+            : undefined;
+
+        return createElement(
+          MotionTag,
+          {
+            key,
+            ...props,
+            custom: info,
+            variants: variantsForType,
+            initial: childInitial,
+            animate: childAnimate,
+            exit: exitProp,
+            onAnimationComplete: onCompleteHandler,
+          },
+          renderedChildren
+        );
+      }
+
+      if (isVoidTag) {
+        return createElement(node.tag, { key, ...props });
+      }
+
+      return createElement(node.tag, { key, ...props }, renderedChildren);
+    }
+
+    function renderNodes(nodes: SplitTextDataNode[], keyPrefix: string) {
+      return nodes.map((node, index) =>
+        renderNode(node, `${keyPrefix}-${index}`)
+      );
+    }
+
+    const child = data
+      ? (() => {
+          const childProps: Record<string, unknown> = {
+            ...(children.props as Record<string, unknown>),
+          };
+          if ("dangerouslySetInnerHTML" in childProps) {
+            delete (childProps as { dangerouslySetInnerHTML?: unknown })
+              .dangerouslySetInnerHTML;
+          }
+          if (data.meta.useAriaLabel && data.meta.ariaLabel) {
+            childProps["aria-label"] = data.meta.ariaLabel;
+          }
+          return createElement(
+            children.type,
+            {
+              ...childProps,
+              key: `split-${childTreeVersion}`,
+            },
+            renderNodes(data.nodes, "split")
+          );
+        })()
+      : cloneElement(children, {
+          key: `raw-${childTreeVersion}`,
+        });
+
+    const Wrapper = getMotionComponent(Component);
+
+    const content = createElement(
+      Wrapper,
+      {
+        ref: mergedRef,
+        "data-griffo-auto-split-wrapper": "true",
+        ...passthroughWrapperProps,
+        className,
+        style: {
+          visibility: isReady || !waitForFonts ? "visible" : "hidden",
+          position: "relative",
+          ...userStyle,
+        },
+        variants: wrapperVariants,
+        initial: wrapperInitial,
+        animate: wrapperAnimate,
+        custom,
+        exit: wrapperExit,
+        transition: wrapperTransition,
+        onHoverStart: handleHoverStart,
+        onHoverEnd: handleHoverEnd,
+        onTapStart: handleTapStart,
+        onTapCancel: handleTapCancel,
+        onTap: handleTapEnd,
+        onFocus: handleFocus,
+        onBlur: handleBlur,
+        onAnimationComplete: handleWrapperAnimationComplete,
+      },
+      child
+    );
+
+    if (reducedMotion) {
+      return createElement(MotionConfig, { reducedMotion }, content);
+    }
+
+    return content;
+}) as SplitTextComponent;

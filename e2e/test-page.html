@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Griffo E2E Tests</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 20px;
+      }
+
+      .test-container {
+        margin-bottom: 40px;
+      }
+
+      .test-container h2 {
+        margin-bottom: 10px;
+        font-size: 14px;
+        color: #666;
+      }
+
+      #kerning-test {
+        font-size: 48px;
+        font-family: Georgia, serif;
+      }
+
+      #lines-test {
+        font-size: 24px;
+        width: 300px;
+        line-height: 1.5;
+      }
+
+      #resize-container {
+        width: 400px;
+        border: 1px solid #ccc;
+        padding: 10px;
+        resize: horizontal;
+        overflow: auto;
+      }
+
+      #resize-test {
+        font-size: 18px;
+      }
+
+      #deadspot-outer {
+        width: 420px;
+        border: 1px dashed #aaa;
+        padding: 10px;
+      }
+
+      #deadspot-inner {
+        width: 100%;
+      }
+
+      #deadspot-test {
+        font-size: 20px;
+        line-height: 1.35;
+      }
+
+      .split-char {
+        display: inline-block;
+      }
+
+      .split-word {
+        display: inline-block;
+      }
+
+      .split-line {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="test-container">
+      <h2>Kerning Test</h2>
+      <p id="kerning-test">WAVE Typography</p>
+    </div>
+
+    <div class="test-container">
+      <h2>Lines Test</h2>
+      <p id="lines-test">
+        The quick brown fox jumps over the lazy dog and continues running
+      </p>
+    </div>
+
+    <div class="test-container">
+      <h2>Resize Test</h2>
+      <div id="resize-container">
+        <p id="resize-test">This text should re-split when container resizes</p>
+      </div>
+    </div>
+
+    <div class="test-container">
+      <h2>Nested Elements Test</h2>
+      <p id="nested-test">
+        Click <a href="/link">here</a> for more <strong>info</strong>
+      </p>
+    </div>
+
+    <div class="test-container">
+      <h2>Deadspot Test</h2>
+      <div id="deadspot-outer">
+        <div id="deadspot-inner">
+          <p id="deadspot-test">
+            Responsive split text should reflow cleanly without words shifting to a new visual row inside the same generated line wrapper.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { splitText } from "/dist/index.js";
+
+      window.splitText = splitText;
+      window.fontsReady = false;
+      window.deadspotResplitCount = 0;
+
+      try {
+        if (document.fonts?.ready) {
+          await document.fonts.ready;
+        }
+      } finally {
+        window.fontsReady = true;
+      }
+    </script>
+  </body>
+</html>
